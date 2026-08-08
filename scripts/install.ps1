@@ -23,6 +23,18 @@ $BackendDir = Join-Path $RootDir "backend"
 $FrontendDir = Join-Path $RootDir "frontend"
 $DataDir    = Join-Path $RootDir "data"
 
+# If this script was launched by double-clicking (not from an already-open
+# PowerShell prompt), the window closes instantly on error and the message
+# is never seen. Catch everything and pause before exiting so it stays open.
+trap {
+    Write-Host ""
+    Write-Host "INSTALLATION FAILED:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Press Enter to close this window"
+    exit 1
+}
+
 Write-Host "=== VulnAssist — Installation ===" -ForegroundColor Cyan
 
 # 1. Check prerequisites
@@ -92,3 +104,5 @@ Write-Host "`n[6/6] Installation complete." -ForegroundColor Green
 Write-Host ""
 Write-Host "Next step: run  .\scripts\start.ps1  to launch VulnAssist," -ForegroundColor Cyan
 Write-Host "then open http://localhost:8000 (or http://<server-name>:8000 from another machine on the network)." -ForegroundColor Cyan
+Write-Host ""
+Read-Host "Press Enter to close this window"

@@ -24,6 +24,18 @@ $RootDir    = Split-Path -Parent $PSScriptRoot
 $BackendDir = Join-Path $RootDir "backend"
 $VenvPython = Join-Path $BackendDir ".venv\Scripts\python.exe"
 
+# If this script was launched by double-clicking (not from an already-open
+# PowerShell prompt), the window closes instantly on error and the message
+# is never seen. Catch everything and pause before exiting so it stays open.
+trap {
+    Write-Host ""
+    Write-Host "VULNASSIST FAILED TO START:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Press Enter to close this window"
+    exit 1
+}
+
 if (-not (Test-Path $VenvPython)) {
     throw "Virtual environment not found. Run .\scripts\install.ps1 first."
 }
@@ -34,6 +46,7 @@ if (-not (Test-Path $FrontendDist)) {
 }
 
 Write-Host "Starting VulnAssist on http://${BindAddress}:${Port} ..." -ForegroundColor Cyan
+Write-Host "Once you see 'Application startup complete' below, open http://localhost:$Port in your browser." -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop." -ForegroundColor DarkGray
 
 Push-Location $BackendDir
@@ -42,3 +55,6 @@ try {
 } finally {
     Pop-Location
 }
+
+Write-Host ""
+Read-Host "VulnAssist stopped. Press Enter to close this window"
