@@ -11,13 +11,10 @@ from app.models.enums import FindingStatus, ImportStatus
 from app.models.finding import Finding
 from app.models.import_history import ImportHistory
 from app.models.scan import Scan
+from app.models.scan_observation import ScanObservation
 from app.repositories.asset_repo import get_or_create_asset
 from app.services.decommission_service import decommission_asset
 from app.services.scoring_service import score_finding
-
-
-def _identity_key(hostname_to_asset_id: dict[str, int], hostname: str, plugin_name: str, port: int | None):
-    return (hostname_to_asset_id[hostname], plugin_name, port)
 
 
 def import_tenable_workbook(
@@ -39,6 +36,7 @@ def import_tenable_workbook(
     db.flush()
 
     hostname_to_asset_id: dict[str, int] = {}
+    observed_finding_ids: set[int] = set()
     new_count = 0
     updated_count = 0
 
@@ -70,7 +68,9 @@ def import_tenable_workbook(
         )
 
         if existing:
-            existing.scan_id = scan.id
+            # Note: scan_id is intentionally left untouched — it records the scan this
+            # finding was first observed in. Per-scan membership (needed for comparison
+            # and for scoping remediation detection below) is tracked via ScanObservation.
             existing.cve = row.cve
             existing.grade = row.grade
             existing.score = row.score
@@ -107,21 +107,35 @@ def import_tenable_workbook(
 
         score_finding(db, finding, asset)
 
-    # Findings from prior scans that no longer appear in this import are resolved.
+        if finding.id not in observed_finding_ids:
+            db.add(ScanObservation(scan_id=scan.id, finding_id=finding.id, observed_at=now))
+            observed_finding_ids.add(finding.id)
+
+    # A finding is only auto-resolved if it belongs to the same recurring scan series
+    # (same "Nom du scan") and is absent from this import. Scoping by scan name — rather
+    # than by "this import happened to touch that asset" — prevents importing one scan
+    # (e.g. a web-scope scan) from closing findings that belong to a different scan
+    # (e.g. an internal-scope scan) just because they share a host.
     resolved_count = 0
-    seen_identities = {
-        (hostname_to_asset_id[row.hostname], row.plugin_name, row.port) for row in parsed.vulnerabilities
-    }
-    still_open = db.scalars(
-        select(Finding).where(Finding.status.in_([FindingStatus.OPEN, FindingStatus.EXCEPTION]))
+    prior_series_finding_ids = set(
+        db.scalars(
+            select(ScanObservation.finding_id)
+            .join(Scan, Scan.id == ScanObservation.scan_id)
+            .where(Scan.name == scan.name, ScanObservation.scan_id != scan.id)
+        )
     )
-    for f in still_open:
-        if f.scan_id == scan.id:
-            continue
-        if (f.asset_id, f.plugin_name, f.port) not in seen_identities and f.asset_id in hostname_to_asset_id.values():
-            f.status = FindingStatus.REMEDIATED
-            f.resolved_at = now
-            resolved_count += 1
+    if prior_series_finding_ids:
+        still_open = db.scalars(
+            select(Finding).where(
+                Finding.id.in_(prior_series_finding_ids),
+                Finding.status.in_([FindingStatus.OPEN, FindingStatus.EXCEPTION]),
+            )
+        )
+        for f in still_open:
+            if f.id not in observed_finding_ids:
+                f.status = FindingStatus.REMEDIATED
+                f.resolved_at = now
+                resolved_count += 1
 
     for hostname in parsed.decommissioned_hostnames:
         decommission_asset(

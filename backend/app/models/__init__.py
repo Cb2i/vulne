@@ -7,6 +7,7 @@ from app.models.import_history import ImportHistory
 from app.models.remediation import RemediationAction, RemediationActionFinding
 from app.models.rules import CAAConfig, OwnershipRule, SLERule
 from app.models.scan import Scan
+from app.models.scan_observation import ScanObservation
 from app.models.team import Team
 from app.models.user import User
 
@@ -22,6 +23,7 @@ __all__ = [
     "OwnershipRule",
     "SLERule",
     "Scan",
+    "ScanObservation",
     "Team",
     "User",
 ]

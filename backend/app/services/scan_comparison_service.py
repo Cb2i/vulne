@@ -1,26 +1,30 @@
-"""Compares two scans (by finding identity = asset + plugin_name + port) to compute
-which findings are new, resolved (fixed) or persisting between them."""
+"""Compares two scans by their recorded ScanObservation membership to compute which
+findings are new, resolved (fixed), or persisting between them.
+
+Findings are deduplicated across imports (the same vulnerability instance is one Finding
+row that can be observed by many scans over time), so comparing on Finding.scan_id would
+only reflect the scan that last touched a finding, not the scans it actually appeared in.
+ScanObservation rows are written once per (scan, finding) pair and never mutated, which is
+what makes this comparison accurate regardless of how many imports happened in between.
+"""
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.finding import Finding
+from app.models.scan_observation import ScanObservation
 from app.schemas.scan import ScanComparisonResult
 
 
-def _identity(f: Finding) -> tuple:
-    return (f.asset_id, f.plugin_name, f.port)
-
-
 def compare_scans(db: Session, baseline_scan_id: int, current_scan_id: int) -> ScanComparisonResult:
-    baseline = list(db.scalars(select(Finding).where(Finding.scan_id == baseline_scan_id)))
-    current = list(db.scalars(select(Finding).where(Finding.scan_id == current_scan_id)))
+    baseline_ids = set(
+        db.scalars(select(ScanObservation.finding_id).where(ScanObservation.scan_id == baseline_scan_id))
+    )
+    current_ids = set(
+        db.scalars(select(ScanObservation.finding_id).where(ScanObservation.scan_id == current_scan_id))
+    )
 
-    baseline_by_identity = {_identity(f): f for f in baseline}
-    current_by_identity = {_identity(f): f for f in current}
-
-    new_ids = [f.id for key, f in current_by_identity.items() if key not in baseline_by_identity]
-    resolved_ids = [f.id for key, f in baseline_by_identity.items() if key not in current_by_identity]
-    persisting_ids = [f.id for key, f in current_by_identity.items() if key in baseline_by_identity]
+    new_ids = sorted(current_ids - baseline_ids)
+    resolved_ids = sorted(baseline_ids - current_ids)
+    persisting_ids = sorted(current_ids & baseline_ids)
 
     return ScanComparisonResult(
         baseline_scan_id=baseline_scan_id,

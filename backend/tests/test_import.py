@@ -3,7 +3,14 @@ from io import BytesIO
 from openpyxl import Workbook
 
 
-def _build_workbook() -> bytes:
+def _build_workbook(
+    scan_name: str = "VM-TEST",
+    hostname: str = "host01",
+    plugin_name: str = "OpenSSL Vulnerability",
+    cve: str = "CVE-2024-0001",
+    exposition: str = "Internet",
+    criticite: str = "Critical",
+) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = "Vulnérabilités"
@@ -18,8 +25,8 @@ def _build_workbook() -> bytes:
     )
     ws.append(
         [
-            "VM-TEST", "D", 66, "OpenSSL Vulnerability", "CVE-2024-0001", "C", 61,
-            "host01.example.local", "host01", "10.0.0.1", "Linux", "TCP", 443,
+            scan_name, "D", 66, plugin_name, cve, "C", 61,
+            f"{hostname}.example.local", hostname, "10.0.0.1", "Linux", "TCP", 443,
             "Test description", "Upgrade OpenSSL", "cvss3", 7.5, "Oui",
         ]
     )
@@ -28,7 +35,7 @@ def _build_workbook() -> bytes:
     tags_ws.append(["🏷️ ANALYSE"])
     tags_ws.append([])
     tags_ws.append(["Nom de l'actif", "Exposition", "Criticité", "Classification"])
-    tags_ws.append(["host01", "Internet", "Critical", "Sensible"])
+    tags_ws.append([hostname, exposition, criticite, "Sensible"])
 
     buffer = BytesIO()
     wb.save(buffer)

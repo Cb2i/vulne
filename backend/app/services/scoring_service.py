@@ -44,10 +44,16 @@ def score_finding(db: Session, finding: Finding, asset: Asset, *, as_of: date | 
     finding.sle_delay_days = sle_result.delay_days
     finding.sle_due_date = sle_result.due_date
 
-    team_id = resolve_team(hostname=asset.hostname, os=asset.os, rules=ownership_rules)
+    # A team already set on the asset (whether from a prior rule match or a manual
+    # override via the Assets page) takes precedence; only fall back to the ownership
+    # rules — and cache their result onto the asset — when it has no team yet.
+    if asset.team_id is not None:
+        team_id = asset.team_id
+    else:
+        team_id = resolve_team(hostname=asset.hostname, os=asset.os, rules=ownership_rules)
+        if team_id is not None:
+            asset.team_id = team_id
     finding.team_id = team_id
-    if asset.team_id is None and team_id is not None:
-        asset.team_id = team_id
 
     matched_exception = find_matching_exception(
         plugin_name=finding.plugin_name,
@@ -66,6 +72,22 @@ def score_finding(db: Session, finding: Finding, asset: Asset, *, as_of: date | 
             finding.status = FindingStatus.OPEN
 
     return finding
+
+
+def rescore_asset_findings(db: Session, asset: Asset) -> int:
+    """Re-run scoring for one asset's open findings. Used after an asset's exposure,
+    criticité, or team is edited directly (those inputs feed the CAA/ownership engines)."""
+    from sqlalchemy import select
+
+    findings = db.scalars(
+        select(Finding).where(
+            Finding.asset_id == asset.id,
+            Finding.status.in_([FindingStatus.OPEN, FindingStatus.EXCEPTION]),
+        )
+    ).all()
+    for finding in findings:
+        score_finding(db, finding, asset)
+    return len(findings)
 
 
 def recompute_all_open_findings(db: Session) -> int:

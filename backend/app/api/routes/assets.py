@@ -6,6 +6,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_user, require_analyst_or_admin
 from app.models.asset import Asset
 from app.schemas.asset import AssetRead, AssetUpdate
+from app.services.scoring_service import rescore_asset_findings
 
 router = APIRouter(prefix="/api/assets", tags=["assets"], dependencies=[Depends(get_current_user)])
 
@@ -36,8 +37,15 @@ def update_asset(asset_id: int, payload: AssetUpdate, db: Session = Depends(get_
     asset = db.get(Asset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Actif introuvable")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    changed_fields = payload.model_dump(exclude_unset=True)
+    for key, value in changed_fields.items():
         setattr(asset, key, value)
+    db.flush()
+
+    # exposition, criticité and team all feed the CAA/SLE/ownership engines directly.
+    if changed_fields.keys() & {"exposition", "criticite", "team_id"}:
+        rescore_asset_findings(db, asset)
+
     db.commit()
     db.refresh(asset)
     return asset

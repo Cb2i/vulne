@@ -101,3 +101,4 @@ def delete_ownership_rule(rule_id: int, db: Session = Depends(get_db)) -> None:
         raise HTTPException(status_code=404, detail="Règle de propriété introuvable")
     db.delete(rule)
     db.commit()
+    recompute_all_open_findings(db)

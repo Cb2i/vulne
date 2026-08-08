@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -15,8 +15,11 @@ router = APIRouter(prefix="/api/findings", tags=["findings"])
 
 
 def _scope_to_team(query, current_user: User):
-    """Team managers and read-only users tied to a team only see their team's findings."""
-    if current_user.role in (UserRole.TEAM_MANAGER,) and current_user.team_id:
+    """Team managers only see their team's findings. A team manager with no team
+    assigned gets an empty result set rather than falling through to global access."""
+    if current_user.role == UserRole.TEAM_MANAGER:
+        if not current_user.team_id:
+            return query.where(false())
         query = query.where(Finding.team_id == current_user.team_id)
     return query
 
@@ -82,7 +85,9 @@ def get_finding(finding_id: int, db: Session = Depends(get_db), current_user: Us
     finding = db.get(Finding, finding_id)
     if not finding:
         raise HTTPException(status_code=404, detail="Finding introuvable")
-    if current_user.role == UserRole.TEAM_MANAGER and current_user.team_id and finding.team_id != current_user.team_id:
+    if current_user.role == UserRole.TEAM_MANAGER and (
+        not current_user.team_id or finding.team_id != current_user.team_id
+    ):
         raise HTTPException(status_code=403, detail="Accès refusé à ce finding")
     return _enrich(db, [finding])[0]
 

@@ -13,5 +13,10 @@ router = APIRouter(prefix="/api/kpi", tags=["kpi"])
 
 @router.get("/summary", response_model=KPISummary)
 def kpi_summary(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)) -> KPISummary:
-    team_id = current_user.team_id if current_user.role == UserRole.TEAM_MANAGER else None
+    if current_user.role == UserRole.TEAM_MANAGER:
+        # A team manager with no team assigned must see nothing, not the global summary.
+        # -1 is not a valid team id, so every team_id-scoped query below matches zero rows.
+        team_id = current_user.team_id or -1
+    else:
+        team_id = None
     return get_kpi_summary(db, team_id=team_id)
