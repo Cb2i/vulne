@@ -12,9 +12,18 @@
     6. Installs frontend dependencies and builds the production bundle
        (served directly by FastAPI — no separate web server needed).
 
+.PARAMETER NoPause
+    Skip the "press Enter to close" prompt on successful completion. Used when this
+    script is chained from another one (e.g. test-windows.ps1); errors still pause
+    regardless of this flag, so failures are never silently swallowed.
+
 .EXAMPLE
     PS> .\scripts\install.ps1
 #>
+
+param(
+    [switch]$NoPause
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -105,4 +114,6 @@ Write-Host ""
 Write-Host "Next step: run  .\scripts\start.ps1  to launch VulnAssist," -ForegroundColor Cyan
 Write-Host "then open http://localhost:8000 (or http://<server-name>:8000 from another machine on the network)." -ForegroundColor Cyan
 Write-Host ""
-Read-Host "Press Enter to close this window"
+if (-not $NoPause) {
+    Read-Host "Press Enter to close this window"
+}
