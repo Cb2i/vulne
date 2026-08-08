@@ -30,7 +30,7 @@ async def import_scan(
 
     content = await file.read()
     try:
-        scan, history = import_tenable_workbook(
+        scan, history, imported_ownership_rules, imported_exceptions = import_tenable_workbook(
             db, file_bytes=content, filename=file.filename, imported_by_id=current_user.id
         )
     except TenableImportError as exc:
@@ -43,6 +43,8 @@ async def import_scan(
         new_findings=history.new_findings,
         updated_findings=history.updated_findings,
         resolved_findings=history.resolved_findings,
+        imported_ownership_rules=imported_ownership_rules,
+        imported_exceptions=imported_exceptions,
         status=history.status,
         warnings=history.error_details.split("; ") if history.error_details else [],
     )

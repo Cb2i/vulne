@@ -83,7 +83,21 @@ export function ImportPage() {
                   <div className="kpi-value">{result.resolved_findings}</div>
                   <div className="kpi-label">Findings remédiés</div>
                 </div>
+                <div className="kpi-card">
+                  <div className="kpi-value">{result.imported_exceptions}</div>
+                  <div className="kpi-label">Exceptions importées</div>
+                </div>
+                <div className="kpi-card">
+                  <div className="kpi-value">{result.imported_ownership_rules}</div>
+                  <div className="kpi-label">Règles d'équipe importées</div>
+                </div>
               </div>
+              {(result.imported_exceptions > 0 || result.imported_ownership_rules > 0) && (
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+                  Ces exceptions et règles sont désormais enregistrées en base : elles s'appliqueront
+                  automatiquement à tous les prochains imports, sans avoir besoin de réimporter ce fichier.
+                </p>
+              )}
               {result.warnings.length > 0 && (
                 <div className="login-error" style={{ borderColor: "rgba(250,204,21,.3)", color: "var(--med)" }}>
                   {result.warnings.join(" · ")}

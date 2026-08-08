@@ -22,6 +22,8 @@ class ImportResult(BaseModel):
     new_findings: int
     updated_findings: int
     resolved_findings: int
+    imported_ownership_rules: int = 0
+    imported_exceptions: int = 0
     status: ImportStatus
     warnings: list[str] = []
 

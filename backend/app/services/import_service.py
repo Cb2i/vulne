@@ -12,14 +12,15 @@ from app.models.finding import Finding
 from app.models.import_history import ImportHistory
 from app.models.scan import Scan
 from app.models.scan_observation import ScanObservation
-from app.repositories.asset_repo import get_or_create_asset
 from app.services.decommission_service import decommission_asset
-from app.services.scoring_service import score_finding
+from app.services.rule_import_service import upsert_exceptions, upsert_ownership_rules
+from app.services.scoring_service import load_scoring_context, score_finding
 
 
 def import_tenable_workbook(
     db: Session, *, file_bytes: bytes, filename: str, imported_by_id: int | None
-) -> tuple[Scan, ImportHistory]:
+) -> tuple[Scan, ImportHistory, int, int]:
+    """Returns (scan, history, imported_ownership_rules, imported_exceptions)."""
     parsed: ParsedImport = parse_tenable_workbook(file_bytes, filename)
     now = datetime.now(timezone.utc)
 
@@ -35,13 +36,47 @@ def import_tenable_workbook(
     db.add(scan)
     db.flush()
 
-    hostname_to_asset_id: dict[str, int] = {}
-    observed_finding_ids: set[int] = set()
+    # Ownership rules and exceptions are persisted *before* scoring findings below, so a
+    # workbook's own "KPI" and "Exceptions" sheets apply immediately to the findings it
+    # is about to create -- and to every future scan, since they're now stored in the
+    # database rather than re-derived from this one file each time.
+    imported_ownership_rules = upsert_ownership_rules(db, parsed.ownership_rules)
+    imported_exceptions = upsert_exceptions(db, parsed.exceptions, imported_by_id=imported_by_id)
+
+    # Loaded once and reused for every row below -- with tens of thousands of rows,
+    # reloading the CAA config / SLE rules / ownership rules / exceptions per row turned
+    # imports that should take a few seconds into ones taking well over a minute.
+    scoring_context = load_scoring_context(db)
+
+    # Bulk-load every asset and open/exception finding this import could possibly touch,
+    # up front, instead of running a SELECT per row (27k rows -> 27k+ round trips
+    # otherwise). Everything below this point works purely against these in-memory
+    # dicts; nothing is flushed until the single db.flush() after the main loop.
+    hostnames = {row.hostname for row in parsed.vulnerabilities}
+    assets_by_hostname: dict[str, Asset] = {
+        a.hostname: a for a in db.scalars(select(Asset).where(Asset.hostname.in_(hostnames)))
+    }
+    preexisting_asset_ids = [a.id for a in assets_by_hostname.values()]
+    id_to_hostname = {a.id: h for h, a in assets_by_hostname.items()}
+
+    finding_index: dict[tuple[str, str, int | None], Finding] = {}
+    if preexisting_asset_ids:
+        preexisting_findings = db.scalars(
+            select(Finding).where(
+                Finding.asset_id.in_(preexisting_asset_ids),
+                Finding.status.in_([FindingStatus.OPEN, FindingStatus.EXCEPTION]),
+            )
+        )
+        for f in preexisting_findings:
+            finding_index[(id_to_hostname[f.asset_id], f.plugin_name, f.port)] = f
+
+    observed_finding_objects: set[int] = set()  # keyed by Python id() -- see note below
+    scan_observations: list[ScanObservation] = []
     new_count = 0
     updated_count = 0
 
     for row in parsed.vulnerabilities:
-        context = parsed.asset_context.get(row.hostname)
+        asset_ctx = parsed.asset_context.get(row.hostname)
         asset_defaults = {
             "fqdn": row.fqdn,
             "ip_address": row.ip_address,
@@ -50,22 +85,23 @@ def import_tenable_workbook(
             "score_actif": row.score_actif,
             "last_seen_at": now,
         }
-        if context:
-            asset_defaults["exposition"] = context.exposition or "Internal"
-            asset_defaults["criticite"] = context.criticite or "Medium"
-            asset_defaults["classification"] = context.classification
+        if asset_ctx:
+            asset_defaults["exposition"] = asset_ctx.exposition or "Internal"
+            asset_defaults["criticite"] = asset_ctx.criticite or "Medium"
+            asset_defaults["classification"] = asset_ctx.classification
 
-        asset = get_or_create_asset(db, hostname=row.hostname, defaults=asset_defaults)
-        hostname_to_asset_id[row.hostname] = asset.id
+        asset = assets_by_hostname.get(row.hostname)
+        if asset is None:
+            asset = Asset(hostname=row.hostname, **asset_defaults)
+            db.add(asset)
+            assets_by_hostname[row.hostname] = asset
+        else:
+            for key, value in asset_defaults.items():
+                if value not in (None, ""):
+                    setattr(asset, key, value)
 
-        existing = db.scalar(
-            select(Finding).where(
-                Finding.asset_id == asset.id,
-                Finding.plugin_name == row.plugin_name,
-                Finding.port == row.port,
-                Finding.status.in_([FindingStatus.OPEN, FindingStatus.EXCEPTION]),
-            )
-        )
+        finding_key = (row.hostname, row.plugin_name, row.port)
+        existing = finding_index.get(finding_key)
 
         if existing:
             # Note: scan_id is intentionally left untouched — it records the scan this
@@ -85,7 +121,7 @@ def import_tenable_workbook(
         else:
             finding = Finding(
                 scan_id=scan.id,
-                asset_id=asset.id,
+                asset=asset,  # relationship, not asset_id: asset.id may not exist yet
                 plugin_name=row.plugin_name,
                 cve=row.cve,
                 grade=row.grade,
@@ -102,14 +138,20 @@ def import_tenable_workbook(
                 last_seen_at=now,
             )
             db.add(finding)
-            db.flush()
+            finding_index[finding_key] = finding
             new_count += 1
 
-        score_finding(db, finding, asset)
+        score_finding(finding, asset, scoring_context)
 
-        if finding.id not in observed_finding_ids:
-            db.add(ScanObservation(scan_id=scan.id, finding_id=finding.id, observed_at=now))
-            observed_finding_ids.add(finding.id)
+        # Dedup by Python object identity rather than finding.id: finding.id doesn't
+        # exist yet for a brand-new finding until the flush below.
+        if id(finding) not in observed_finding_objects:
+            scan_observations.append(ScanObservation(scan=scan, finding=finding, observed_at=now))
+            observed_finding_objects.add(id(finding))
+
+    db.add_all(scan_observations)
+    db.flush()
+    observed_finding_ids = {so.finding_id for so in scan_observations}
 
     # A finding is only auto-resolved if it belongs to the same recurring scan series
     # (same "Nom du scan") and is absent from this import. Scoping by scan name — rather
@@ -159,4 +201,4 @@ def import_tenable_workbook(
     db.commit()
     db.refresh(scan)
     db.refresh(history)
-    return scan, history
+    return scan, history, imported_ownership_rules, imported_exceptions

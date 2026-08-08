@@ -99,6 +99,8 @@ export interface ImportResult {
   new_findings: number;
   updated_findings: number;
   resolved_findings: number;
+  imported_ownership_rules: number;
+  imported_exceptions: number;
   status: ImportStatus;
   warnings: string[];
 }
