@@ -23,7 +23,7 @@ trap {
     exit 1
 }
 
-Write-Host "=== VulnAssist — Quick test launch ===" -ForegroundColor Cyan
+Write-Host "=== VulnAssist - Quick test launch ===" -ForegroundColor Cyan
 
 # 1. Pull the latest code, if this is a git checkout.
 if (Test-Path (Join-Path $RootDir ".git")) {

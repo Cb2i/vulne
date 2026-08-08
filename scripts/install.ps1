@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Installs VulnAssist on a Windows Server (or Windows 10/11) machine.
-    No Docker, no IIS, no cloud service required — just Python and Node.js.
+    No Docker, no IIS, no cloud service required - just Python and Node.js.
 
 .DESCRIPTION
     1. Verifies Python 3.11+ and Node.js are available.
@@ -10,7 +10,7 @@
     4. Creates the SQLite database and applies Alembic migrations.
     5. Seeds a default admin user, default CAA/SLE rules, and starter teams.
     6. Installs frontend dependencies and builds the production bundle
-       (served directly by FastAPI — no separate web server needed).
+       (served directly by FastAPI - no separate web server needed).
 
 .PARAMETER NoPause
     Skip the "press Enter to close" prompt on successful completion. Used when this
@@ -44,7 +44,7 @@ trap {
     exit 1
 }
 
-Write-Host "=== VulnAssist — Installation ===" -ForegroundColor Cyan
+Write-Host "=== VulnAssist - Installation ===" -ForegroundColor Cyan
 
 # 1. Check prerequisites
 Write-Host "`n[1/6] Verifying prerequisites..." -ForegroundColor Yellow
@@ -87,7 +87,7 @@ if (-not (Test-Path $DataDir)) {
 $EnvFile = Join-Path $BackendDir ".env"
 if (-not (Test-Path $EnvFile)) {
     Copy-Item (Join-Path $BackendDir ".env.example") $EnvFile
-    Write-Host "  Created backend/.env from .env.example — edit it to set a real VULNASSIST_SECRET_KEY before going to production."
+    Write-Host "  Created backend/.env from .env.example - edit it to set a real VULNASSIST_SECRET_KEY before going to production."
 }
 
 Push-Location $BackendDir

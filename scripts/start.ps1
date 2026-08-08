@@ -42,7 +42,7 @@ if (-not (Test-Path $VenvPython)) {
 
 $FrontendDist = Join-Path $RootDir "frontend\dist"
 if (-not (Test-Path $FrontendDist)) {
-    Write-Warning "frontend/dist not found — the compiled UI won't be served. Run 'npm run build' in frontend/, or re-run install.ps1."
+    Write-Warning "frontend/dist not found - the compiled UI won't be served. Run 'npm run build' in frontend/, or re-run install.ps1."
 }
 
 Write-Host "Starting VulnAssist on http://${BindAddress}:${Port} ..." -ForegroundColor Cyan

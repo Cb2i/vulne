@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Backs up the VulnAssist SQLite database to a timestamped file.
-    (If you have migrated to PostgreSQL, use pg_dump instead — this script only
+    (If you have migrated to PostgreSQL, use pg_dump instead - this script only
     covers the default SQLite setup.)
 
 .EXAMPLE
