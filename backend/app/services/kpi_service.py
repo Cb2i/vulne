@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.asset import Asset
@@ -12,32 +12,36 @@ from app.schemas.kpi import KPISummary, SeverityCount, TeamCount
 
 
 def get_kpi_summary(db: Session, *, team_id: int | None = None) -> KPISummary:
+    """All aggregation happens in SQL (COUNT/GROUP BY) rather than loading every open
+    finding into Python -- with tens of thousands of findings, hydrating full ORM
+    objects just to sum/group them in a for-loop made every dashboard load noticeably
+    slow, since this endpoint is hit on essentially every visit to the app."""
     today = date.today()
     thirty_days_ago = today - timedelta(days=30)
 
     open_statuses = [FindingStatus.OPEN, FindingStatus.EXCEPTION]
+    overdue_case = case((Finding.sle_due_date < today, 1), else_=0)
 
-    base_query = select(Finding).where(Finding.status.in_(open_statuses))
+    open_filter = [Finding.status.in_(open_statuses)]
     if team_id is not None:
-        base_query = base_query.where(Finding.team_id == team_id)
-    open_findings = list(db.scalars(base_query))
+        open_filter.append(Finding.team_id == team_id)
 
-    total_open = len(open_findings)
-    overdue = sum(1 for f in open_findings if f.sle_due_date and f.sle_due_date < today)
+    total_open, overdue = db.execute(
+        select(func.count(), func.coalesce(func.sum(overdue_case), 0)).where(*open_filter)
+    ).one()
     compliance_rate = round(100.0 * (total_open - overdue) / total_open, 1) if total_open else 100.0
 
-    by_severity: dict[str, int] = {}
-    for f in open_findings:
-        key = f.caa_severity.value if f.caa_severity else "Non évalué"
-        by_severity[key] = by_severity.get(key, 0) + 1
+    severity_rows = db.execute(
+        select(Finding.caa_severity, func.count()).where(*open_filter).group_by(Finding.caa_severity)
+    ).all()
+    by_severity = {(sev.value if sev else "Non évalué"): count for sev, count in severity_rows}
 
+    team_rows = db.execute(
+        select(Finding.team_id, func.count(), func.coalesce(func.sum(overdue_case), 0))
+        .where(*open_filter)
+        .group_by(Finding.team_id)
+    ).all()
     team_names = {t.id: t.name for t in db.scalars(select(Team))}
-    by_team: dict[int | None, dict[str, int]] = {}
-    for f in open_findings:
-        bucket = by_team.setdefault(f.team_id, {"count": 0, "overdue": 0})
-        bucket["count"] += 1
-        if f.sle_due_date and f.sle_due_date < today:
-            bucket["overdue"] += 1
 
     total_assets = db.scalar(select(func.count()).select_from(Asset)) or 0
     total_decommissioned = db.scalar(select(func.count()).select_from(Asset).where(Asset.is_decommissioned.is_(True))) or 0
@@ -66,10 +70,10 @@ def get_kpi_summary(db: Session, *, team_id: int | None = None) -> KPISummary:
             TeamCount(
                 team_id=tid,
                 team_name=team_names.get(tid, "Non assigné") if tid else "Non assigné",
-                count=v["count"],
-                overdue_count=v["overdue"],
+                count=count,
+                overdue_count=overdue_count,
             )
-            for tid, v in sorted(by_team.items(), key=lambda kv: kv[1]["count"], reverse=True)
+            for tid, count, overdue_count in sorted(team_rows, key=lambda row: row[1], reverse=True)
         ],
         remediated_last_30_days=remediated_30d,
         new_last_30_days=new_30d,

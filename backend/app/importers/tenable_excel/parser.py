@@ -334,6 +334,12 @@ def parse_tenable_workbook(file_bytes: bytes, filename: str = "import.xlsx") -> 
             _parse_exceptions_sheet(workbook, exceptions_sheet, result)
         except TenableImportError as exc:
             result.warnings.append(str(exc))
+    else:
+        result.warnings.append(
+            f"Aucune feuille « {EXCEPTIONS_SHEET_CANDIDATES[0]} » trouvée dans ce classeur — "
+            "aucune exception n'a été importée. Feuilles présentes : "
+            f"{', '.join(workbook.sheetnames)}."
+        )
 
     ownership_sheet = _find_sheet(workbook, OWNERSHIP_SHEET_CANDIDATES)
     if ownership_sheet:
@@ -356,6 +362,11 @@ def parse_tenable_workbook(file_bytes: bytes, filename: str = "import.xlsx") -> 
                 )
         except TenableImportError as exc:
             result.warnings.append(str(exc))
+    else:
+        result.warnings.append(
+            f"Aucune feuille « {OWNERSHIP_SHEET_CANDIDATES[0]} » trouvée dans ce classeur — "
+            "aucune règle d'équipe n'a été importée."
+        )
 
     workbook.close()
 

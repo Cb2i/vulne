@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import false, select
+from sqlalchemy import false, func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -73,7 +73,11 @@ def list_findings(
         like = f"%{search}%"
         query = query.where((Finding.plugin_name.ilike(like)) | (Finding.cve.ilike(like)))
 
-    total = len(list(db.scalars(query)))
+    # A plain COUNT(*) over the filtered query, instead of loading every matching row
+    # into Python just to call len() on it -- with tens of thousands of findings that
+    # was the single biggest contributor to the findings page feeling sluggish, since
+    # it ran on every page load and every filter change.
+    total = db.scalar(select(func.count()).select_from(query.subquery())) or 0
     query = query.order_by(Finding.caa_score.desc().nullslast()).offset((page - 1) * page_size).limit(page_size)
     findings = list(db.scalars(query))
 
