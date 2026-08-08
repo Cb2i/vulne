@@ -13,6 +13,7 @@ import { ImportPage } from "./pages/ImportPage";
 import { LoginPage } from "./pages/LoginPage";
 import { RemediationPage } from "./pages/RemediationPage";
 import { RulesPage } from "./pages/RulesPage";
+import { ScanComparePage } from "./pages/ScanComparePage";
 import { TeamsPage } from "./pages/TeamsPage";
 import { UsersPage } from "./pages/UsersPage";
 
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="/findings/:id" element={<FindingDetailPage />} />
             <Route path="/assets" element={<AssetsPage />} />
             <Route path="/remediation" element={<RemediationPage />} />
+            <Route path="/scans/compare" element={<ScanComparePage />} />
             <Route
               path="/import"
               element={

@@ -24,6 +24,7 @@ const SECTIONS: NavSection[] = [
       { to: "/findings", label: "Findings" },
       { to: "/assets", label: "Actifs" },
       { to: "/remediation", label: "Remédiation" },
+      { to: "/scans/compare", label: "Comparer les scans" },
       { to: "/import", label: "Import Tenable", roles: ["admin", "analyst"] },
     ],
   },
