@@ -52,9 +52,15 @@ Write-Host "Press Ctrl+C to stop." -ForegroundColor DarkGray
 Push-Location $BackendDir
 try {
     & $VenvPython -m uvicorn app.main:app --host $BindAddress --port $Port
+    $ExitCode = $LASTEXITCODE
 } finally {
     Pop-Location
 }
 
 Write-Host ""
-Read-Host "VulnAssist stopped. Press Enter to close this window"
+if ($ExitCode -ne 0) {
+    Write-Host "VulnAssist exited with an error (see above)." -ForegroundColor Red
+} else {
+    Write-Host "VulnAssist stopped." -ForegroundColor DarkGray
+}
+Read-Host "Press Enter to close this window"
