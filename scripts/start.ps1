@@ -45,6 +45,42 @@ if (-not (Test-Path $FrontendDist)) {
     Write-Warning "frontend/dist not found - the compiled UI won't be served. Run 'npm run build' in frontend/, or re-run install.ps1."
 }
 
+# Closing this window without Ctrl+C first can leave a previous VulnAssist process
+# running in the background, still bound to the port -- the next start then fails
+# with a cryptic Windows socket error, while your browser keeps silently talking to
+# the OLD (stale) process the whole time. Detect and clear that specific case, but
+# only kill a process that's clearly a previous run of this app's own Python, never
+# an unrelated process that just happens to be using the port.
+$existingConnections = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
+if ($existingConnections) {
+    $ownPids = New-Object System.Collections.Generic.List[int]
+    $otherPids = New-Object System.Collections.Generic.List[string]
+    foreach ($conn in $existingConnections) {
+        $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+        $procPath = $null
+        if ($null -ne $proc) {
+            try { $procPath = $proc.Path } catch { $procPath = $null }
+        }
+        if ($null -ne $proc -and $procPath -eq $VenvPython) {
+            $ownPids.Add($conn.OwningProcess)
+        } elseif ($null -ne $proc) {
+            $otherPids.Add("$($proc.ProcessName) (PID $($conn.OwningProcess))")
+        }
+    }
+    if ($ownPids.Count -gt 0) {
+        Write-Host "Port $Port is held by a previous VulnAssist process that wasn't fully closed -- stopping it..." -ForegroundColor Yellow
+        $ownPids | Select-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 1
+    }
+    if ($otherPids.Count -gt 0) {
+        throw (
+            "Port $Port is already in use by another program: $($otherPids -join ', '). " +
+            "This isn't a VulnAssist process, so it wasn't stopped automatically. " +
+            "Close that program, or run '.\scripts\start.ps1 -Port 8080' to use a different port."
+        )
+    }
+}
+
 Write-Host "Starting VulnAssist on http://${BindAddress}:${Port} ..." -ForegroundColor Cyan
 Write-Host "Once you see 'Application startup complete' below, open http://localhost:$Port in your browser." -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop." -ForegroundColor DarkGray
