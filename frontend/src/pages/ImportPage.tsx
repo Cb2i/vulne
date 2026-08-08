@@ -1,18 +1,41 @@
 import { ChangeEvent, useEffect, useState } from "react";
+import { useAuth } from "../hooks/useAuth";
 import { api, ApiError } from "../services/api";
 import type { ImportResult, Scan } from "../types";
 
 export function ImportPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [scans, setScans] = useState<Scan[]>([]);
   const [uploading, setUploading] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   function loadScans() {
     api.get<Scan[]>("/scans").then(setScans).catch(() => undefined);
   }
 
   useEffect(loadScans, []);
+
+  async function handleDelete(scan: Scan) {
+    const confirmed = window.confirm(
+      `Supprimer le scan « ${scan.name} » (${scan.finding_count} lignes importées le ` +
+        `${new Date(scan.imported_at).toLocaleDateString("fr-CA")}) ?\n\n` +
+        "Les findings uniquement observés dans ce scan seront supprimés définitivement. " +
+        "Les findings revus depuis dans un autre scan seront conservés.",
+    );
+    if (!confirmed) return;
+    setDeletingId(scan.id);
+    try {
+      await api.delete(`/scans/${scan.id}`);
+      loadScans();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Échec de la suppression");
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -121,12 +144,13 @@ export function ImportPage() {
                 <th>Importé le</th>
                 <th>Findings</th>
                 <th>Statut</th>
+                {isAdmin && <th></th>}
               </tr>
             </thead>
             <tbody>
               {scans.length === 0 && (
                 <tr>
-                  <td colSpan={5}>
+                  <td colSpan={isAdmin ? 6 : 5}>
                     <div className="empty-state">Aucun import pour le moment.</div>
                   </td>
                 </tr>
@@ -142,6 +166,17 @@ export function ImportPage() {
                       {s.status}
                     </span>
                   </td>
+                  {isAdmin && (
+                    <td>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        disabled={deletingId === s.id}
+                        onClick={() => handleDelete(s)}
+                      >
+                        {deletingId === s.id ? "Suppression…" : "Supprimer"}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

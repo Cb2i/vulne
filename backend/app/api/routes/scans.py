@@ -3,13 +3,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_user, require_analyst_or_admin
+from app.core.deps import get_current_user, require_admin, require_analyst_or_admin
 from app.importers.tenable_excel.parser import TenableImportError
 from app.models.scan import Scan
 from app.models.user import User
 from app.schemas.scan import ImportResult, ScanComparisonResult, ScanRead
 from app.services.import_service import import_tenable_workbook
 from app.services.scan_comparison_service import compare_scans
+from app.services.scan_service import delete_scan
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
@@ -55,3 +56,13 @@ def compare(baseline_scan_id: int, current_scan_id: int, db: Session = Depends(g
     if not db.get(Scan, baseline_scan_id) or not db.get(Scan, current_scan_id):
         raise HTTPException(status_code=404, detail="Scan introuvable")
     return compare_scans(db, baseline_scan_id, current_scan_id)
+
+
+@router.delete("/{scan_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+def delete_scan_endpoint(scan_id: int, db: Session = Depends(get_db)) -> None:
+    """Deletes an imported scan. Findings still observed by other scans are kept and
+    re-anchored; findings only ever seen in this scan are removed with it. Exceptions
+    and ownership rules imported alongside it are never touched by this."""
+    if not db.get(Scan, scan_id):
+        raise HTTPException(status_code=404, detail="Scan introuvable")
+    delete_scan(db, scan_id)
