@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# État/résultats générés par l'agent (contiennent des données d'exécution, pas du code)
+agent/state.json
+agent/findings.json
+
+# Secrets locaux Azure Functions
+azure_function/local.settings.json
