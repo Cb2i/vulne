@@ -1,0 +1,52 @@
+name: Surveillance anti-typosquatting
+
+on:
+  schedule:
+    # Tous les jours à 06h00 UTC
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dépendances
+        run: pip install -r agent/requirements.txt
+
+      - name: Restaurer l'état précédent
+        uses: actions/cache@v4
+        with:
+          path: agent/state.json
+          # Clé unique par run : garantit que le "post" step sauvegarde bien
+          # le nouvel état à chaque fois (actions/cache ne réécrit pas une
+          # clé déjà existante). restore-keys retombe sur le run précédent.
+          key: typosquat-state-${{ github.run_id }}
+          restore-keys: typosquat-state-
+
+      - name: Lancer le scan
+        env:
+          TARGET_DOMAIN: ${{ vars.TARGET_DOMAIN }}
+          BRAND_KEYWORDS: ${{ vars.BRAND_KEYWORDS }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL_FROM: ${{ secrets.ALERT_EMAIL_FROM }}
+          ALERT_EMAIL_TO: ${{ secrets.ALERT_EMAIL_TO }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          TEAMS_WEBHOOK_URL: ${{ secrets.TEAMS_WEBHOOK_URL }}
+        run: python -m agent.main
+
+      - name: Publier le rapport
+        uses: actions/upload-artifact@v4
+        with:
+          name: typosquat-findings
+          path: agent/findings.json
+          retention-days: 30
