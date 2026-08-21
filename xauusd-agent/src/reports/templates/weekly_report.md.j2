@@ -1,0 +1,37 @@
+{# Gabarit du rapport hebdomadaire. Ne jamais utiliser le caractere em dash "—" : utiliser "-". #}
+# 🤖 XAUUSD.sc - WEEKLY OUTLOOK
+
+**Semaine du {{ week.start }} au {{ week.end }}**
+**Performance : {{ week.performance_pct }}% | High : {{ week.high }} | Low : {{ week.low }} | Amplitude : {{ week.range }}**
+
+## Revue de la semaine
+- Daily/H4/H1 : {{ week.trend_summary }}
+- Volatilite : {{ week.volatility_summary }}
+- DXY : {{ week.dxy_summary }}
+- US10Y : {{ week.us10y_summary }}
+- US02Y : {{ week.us02y_summary }}
+
+## Evenements ayant reellement deplace l'or cette semaine
+{% for ev in week.market_moving_events %}- {{ ev.date }} {{ ev.time }} - {{ ev.name }} : {{ ev.effect }} (Source : {{ ev.source }})
+{% endfor %}
+
+## Niveaux techniques importants
+- Resistances : {{ week.resistances }}
+- Supports : {{ week.supports }}
+
+## Semaine prochaine : carte de risque
+| Jour | Risque | Evenement | Heure Montreal |
+|---|---|---|---|
+{% for day in next_week %}| {{ day.name }} | {{ day.risk_emoji }} | {{ day.event }} | {{ day.time }} |
+{% endfor %}
+
+**Recommandation robot EA pour la semaine (a valider par vous-meme) :**
+{{ robot.weekly_guidance }}
+
+## Sources
+{% for s in sources %}- {{ s }}
+{% endfor %}
+
+---
+Ce rapport est une veille de marche, pas un conseil en investissement ni une
+promesse de rendement.

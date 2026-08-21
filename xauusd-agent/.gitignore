@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+cache/
+data/*.db
+data/puprime_specs.json
+reports_out/
+.venv/
+venv/
