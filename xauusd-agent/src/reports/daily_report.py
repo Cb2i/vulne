@@ -12,7 +12,7 @@ from jinja2 import Environment, FileSystemLoader
 
 from ..analysis import levels as levels_mod
 from ..analysis import sessions as sessions_mod
-from ..analysis.technical import compute_all
+from ..analysis.technical import atr_with_average, candles_to_df, compute_all, range_amplitude_ratio
 from ..collectors.economic_calendar import CalendarEvent, get_calendar, is_high_impact
 from ..collectors.fred_client import get_us_yields
 from ..collectors.market_data import get_market_snapshot
@@ -49,12 +49,17 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
 
     daily_candles = tf_data["D1"]["snapshot"].candles if tf_data["D1"]["snapshot"] else []
     h1_candles = tf_data["H1"]["snapshot"].candles if tf_data["H1"]["snapshot"] else []
+    m15_candles = tf_data["M15"]["snapshot"].candles if tf_data["M15"]["snapshot"] else []
     pdh_pdl = levels_mod.previous_day_high_low(daily_candles)
     weekly = levels_mod.weekly_high_low(daily_candles)
-    sr = levels_mod.support_resistance_from_swings(h1_candles)
+    sr = levels_mod.support_resistance_from_swings(h1_candles, last_close=h1_ind["last_close"])
     psych = levels_mod.psychological_levels(h1_ind["last_close"])
 
     sessions = sessions_mod.build_sessions(now)
+    session_flags = sessions_mod.session_flags(now)
+
+    h1_atr_current, h1_atr_avg20 = atr_with_average(candles_to_df(h1_candles))
+    m15_ratio = range_amplitude_ratio(candles_to_df(m15_candles))
 
     calendar_events: list[CalendarEvent] = get_calendar()
     events_montreal = []
@@ -79,13 +84,13 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
         next_major_event_dt=next_event[0] if next_event else None,
         now=now,
         is_major_event=bool(next_event),
-        atr14=h1_ind["atr14"],
-        atr_avg20=None,  # necessite un historique ATR non calcule dans ce mode simple
-        m15_amplitude_ratio=None,
-        in_session_overlap=False,
-        in_single_session=False,
-        dxy_change_pct=None,
-        us10y_change_bp=None,
+        atr14=h1_atr_current,
+        atr_avg20=h1_atr_avg20,
+        m15_amplitude_ratio=m15_ratio,
+        in_session_overlap=session_flags["in_overlap"],
+        in_single_session=session_flags["in_single_session"],
+        dxy_change_pct=None,  # aucune source DXY branchee pour l'instant, voir ARCHITECTURE.md
+        us10y_change_bp=None,  # FRED ne fournit qu'une observation/jour : pas de variation intra-journee fiable
         confirmed_major_news=False,
     )
 

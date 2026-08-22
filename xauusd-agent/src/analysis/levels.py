@@ -31,11 +31,19 @@ def psychological_levels(last_close: float | None, step: float = 50.0, span: int
     return [base + i * step for i in range(-span, span + 1)]
 
 
-def support_resistance_from_swings(h1_candles: list[Candle], lookback: int = 60) -> dict[str, list[float]]:
+def support_resistance_from_swings(
+    h1_candles: list[Candle], lookback: int = 60, last_close: float | None = None
+) -> dict[str, list[float]]:
     """
     Supports/resistances approximes par les plus hauts/bas locaux (swing highs/lows)
     sur les `lookback` dernieres bougies H1. Methode simple, deterministe, basee
     uniquement sur les donnees fournies (pas d'estimation subjective).
+
+    Si `last_close` est fourni, les resistances sont filtrees a >= last_close et
+    les supports a <= last_close (les plus proches du prix en premier) : sans ce
+    filtre, un swing high sous le prix actuel se retrouvait classe "resistance"
+    alors qu'il est en realite sous une valeur classee "support", ce qui rendait
+    la section Key Levels incoherente.
     """
     df = candles_to_df(h1_candles).tail(lookback)
     if len(df) < 5:
@@ -48,6 +56,15 @@ def support_resistance_from_swings(h1_candles: list[Candle], lookback: int = 60)
             highs.append(float(df["high"].iloc[i]))
         if df["low"].iloc[i] == window_l.min():
             lows.append(float(df["low"].iloc[i]))
-    resistances = sorted(set(round(h, 2) for h in highs), reverse=True)[:3]
-    supports = sorted(set(round(l, 2) for l in lows), reverse=True)[:3]
+
+    all_highs = sorted(set(round(h, 2) for h in highs))
+    all_lows = sorted(set(round(l, 2) for l in lows), reverse=True)
+
+    if last_close is not None:
+        resistances = [h for h in all_highs if h >= last_close][:3]
+        supports = [l for l in all_lows if l <= last_close][:3]
+    else:
+        resistances = list(reversed(all_highs))[:3]
+        supports = all_lows[:3]
+
     return {"resistances": resistances, "supports": supports}

@@ -54,7 +54,8 @@ def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> 
     }
 
 
-def atr(df: pd.DataFrame, period: int = 14) -> float | None:
+def atr_series(df: pd.DataFrame, period: int = 14) -> pd.Series | None:
+    """Serie complete de l'ATR (une valeur par bougie), pas seulement la derniere."""
     if len(df) < period + 1:
         return None
     high, low, close = df["high"], df["low"], df["close"]
@@ -62,8 +63,50 @@ def atr(df: pd.DataFrame, period: int = 14) -> float | None:
     tr = pd.concat(
         [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
     ).max(axis=1)
-    value = tr.rolling(period).mean().iloc[-1]
+    return tr.rolling(period).mean()
+
+
+def atr(df: pd.DataFrame, period: int = 14) -> float | None:
+    series = atr_series(df, period)
+    if series is None:
+        return None
+    value = series.iloc[-1]
     return None if pd.isna(value) else float(value)
+
+
+def atr_with_average(df: pd.DataFrame, period: int = 14, avg_lookback: int = 20) -> tuple[float | None, float | None]:
+    """
+    Retourne (ATR courant, moyenne des `avg_lookback` valeurs d'ATR precedentes),
+    utilise par le Risk Engine pour comparer la volatilite actuelle a sa
+    moyenne recente. (None, None) si l'historique fourni est insuffisant.
+    """
+    series = atr_series(df, period)
+    if series is None:
+        return None, None
+    valid = series.dropna()
+    if len(valid) < avg_lookback + 1:
+        return None, None
+    current = float(valid.iloc[-1])
+    average = float(valid.iloc[-(avg_lookback + 1):-1].mean())
+    return current, average
+
+
+def range_amplitude_ratio(df: pd.DataFrame, recent: int = 3, lookback: int = 20) -> float | None:
+    """
+    Ratio entre l'amplitude (high - low) moyenne des `recent` dernieres
+    bougies et celle des `lookback` bougies precedentes. Utilise pour
+    detecter un sursaut de volatilite recent (ex. amplitude M15 apres une
+    publication macro) sans jamais inventer de seuil : retourne None si
+    l'historique est insuffisant.
+    """
+    if len(df) < recent + lookback:
+        return None
+    ranges = df["high"] - df["low"]
+    recent_avg = ranges.tail(recent).mean()
+    baseline = ranges.tail(recent + lookback).head(lookback).mean()
+    if baseline == 0 or pd.isna(baseline) or pd.isna(recent_avg):
+        return None
+    return float(recent_avg / baseline)
 
 
 def realized_volatility(df: pd.DataFrame, lookback: int = 20) -> float | None:
