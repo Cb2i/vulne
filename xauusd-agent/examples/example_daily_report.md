@@ -33,22 +33,22 @@ recommandee sur XAUUSD.sc autour de la publication.
 ## 2. Technical Analysis (Daily -> H4 -> H1 -> M15)
 | Timeframe | Tendance | Structure | RSI14 | ATR14 |
 |---|---|---|---|---|
-| Daily | Haussiere | Range haut, proche des sommets recents | 58 | 21.40 |
-| H4 | Haussiere | Higher highs / higher lows | 61 | 9.80 |
-| H1 | Haussiere | Au-dessus EMA20/50/200 | 63 | 3.10 |
-| M15 | Neutre | Consolidation avant CPI | 52 | 1.05 |
+| Daily | Haussiere | Range haut, proche des sommets recents | 68 | 42.30 |
+| H4 | Haussiere | Higher highs / higher lows | 65 | 19.80 |
+| H1 | Haussiere | Au-dessus EMA20/50/200 | 63 | 8.10 |
+| M15 | Neutre | Consolidation avant CPI | 52 | 1.90 |
 
-EMA20 : 2415.30 | EMA50 : 2398.10 | EMA200 : 2340.60
-MACD (H1) : MACD 4.20 / Signal 3.10 / Hist 1.10
+EMA20 : 4593.70 | EMA50 : 4549.60 | EMA200 : 4450.90
+MACD (H1) : MACD 12.20 / Signal 9.10 / Hist 3.10
 
 ## 3. Key Levels
-- Previous Day High : 2421.50
-- Previous Day Low : 2402.10
-- Weekly High : 2428.90
-- Weekly Low : 2385.40
-- Resistances : 2425.00, 2440.00
-- Supports : 2400.00, 2385.00
-- Zones psychologiques : 2400, 2450
+- Previous Day High : 4631.90
+- Previous Day Low : 4580.10
+- Weekly High : 4645.30
+- Weekly Low : 4509.70
+- Resistances : 4650.00, 4680.00
+- Supports : 4600.00, 4580.00
+- Zones psychologiques : 4600, 4650
 
 ## 4. Market Sessions (heure Montreal, DST prise en compte)
 🌏 Asie : 20:00 - 05:00
@@ -103,6 +103,7 @@ MACD (H1) : MACD 4.20 / Signal 3.10 / Hist 1.10
 - Federal Reserve (discours Powell) - exemple
 - FRED (US10Y, US02Y) - exemple
 - Reuters (contexte) - exemple
+- Investing.com, niveau 4, complement, verification manuelle : cours Or et calendrier economique
 
 ---
 Ce rapport est une veille de marche et une analyse de risque. Il ne constitue pas
