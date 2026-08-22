@@ -19,6 +19,13 @@ def main() -> None:
         print(__doc__)
         sys.exit(1)
 
+    # Charge .env (cles API) avant toute commande : daily/weekly appellent les
+    # collecteurs directement, sans passer par start_scheduler(), qui etait le
+    # seul endroit a charger .env auparavant.
+    from src.config import load_config
+
+    load_config()
+
     command = sys.argv[1]
 
     if command == "daily":
