@@ -43,17 +43,40 @@ def session_window_for_day(
 ) -> SessionWindow:
     """
     Calcule la fenetre d'une session (ex. Londres 08:00-16:30 heure locale de
-    session) et la convertit en America/Montreal pour la date de reference
-    donnee. Recalcule chaque appel : ne suppose jamais un decalage constant.
-    """
-    local_date = reference_date_montreal.astimezone(zone).date()
-    start_local = datetime.combine(local_date, open_time, tzinfo=zone)
-    end_local = datetime.combine(local_date, close_time, tzinfo=zone)
-    if end_local <= start_local:
-        # session traversant minuit heure locale
-        from datetime import timedelta
+    session) et la convertit en America/Montreal, ancree sur la meme date
+    calendaire Montreal (`reference_date_montreal`) pour toutes les sessions.
 
-        end_local += timedelta(days=1)
+    Important : on ne peut pas deriver la date locale de la session en
+    convertissant simplement l'instant de reference dans le fuseau de la
+    session (`reference_dt.astimezone(zone).date()`). Une session en avance
+    sur Montreal (ex. Londres, Tokyo) peut deja etre passee au jour civil
+    suivant alors que Montreal/New York ne le sont pas encore (typiquement en
+    soiree) : chaque session calculait alors sa propre "journee" independamment,
+    ce qui decalait les fenetres d'un jour entre elles pres de minuit Montreal
+    et cassait le calcul du chevauchement Londres/New York. On cherche donc,
+    parmi les dates locales -1/0/+1, celle dont le debut converti retombe bien
+    sur la date Montreal de reference.
+    """
+    from datetime import timedelta
+
+    target_date = reference_date_montreal.astimezone(MONTREAL).date()
+    local_date = target_date
+    start_local = end_local = None
+    for delta in (-1, 0, 1):
+        candidate_date = target_date + timedelta(days=delta)
+        candidate_start = datetime.combine(candidate_date, open_time, tzinfo=zone)
+        candidate_end = datetime.combine(candidate_date, close_time, tzinfo=zone)
+        if candidate_end <= candidate_start:
+            candidate_end += timedelta(days=1)  # session traversant minuit heure locale
+        if candidate_start.astimezone(MONTREAL).date() == target_date:
+            local_date, start_local, end_local = candidate_date, candidate_start, candidate_end
+            break
+    if start_local is None:
+        # Cas limite improbable (transition DST) : fallback sur delta=0.
+        start_local = datetime.combine(local_date, open_time, tzinfo=zone)
+        end_local = datetime.combine(local_date, close_time, tzinfo=zone)
+        if end_local <= start_local:
+            end_local += timedelta(days=1)
     return SessionWindow(
         name=name,
         start_montreal=start_local.astimezone(MONTREAL),
