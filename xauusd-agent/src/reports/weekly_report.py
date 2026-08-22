@@ -42,7 +42,9 @@ def build_weekly_context() -> dict:
 
     start_next_week = now + timedelta(days=(7 - now.weekday()))
     end_next_week = start_next_week + timedelta(days=6)
-    events = get_calendar(start=start_next_week.strftime("%Y-%m-%d"), end=end_next_week.strftime("%Y-%m-%d"))
+    calendar_result = get_calendar(start=start_next_week.strftime("%Y-%m-%d"), end=end_next_week.strftime("%Y-%m-%d"))
+    events = calendar_result.events
+    calendar_verified = calendar_result.verified
 
     next_week_map: dict[str, list[CalendarEvent]] = {name: [] for name in DAY_NAMES_FR}
     for ev in events:
@@ -60,8 +62,12 @@ def build_weekly_context() -> dict:
             dt, ev = major[0]
             risk_emoji = "🔴" if len(major) > 0 else "🟢"
             next_week_rows.append({"name": day_name, "risk_emoji": risk_emoji, "event": ev.event, "time": dt.strftime("%H:%M")})
+        elif not calendar_verified:
+            next_week_rows.append(
+                {"name": day_name, "risk_emoji": "🟠", "event": "Calendrier NON VERIFIE (source indisponible)", "time": NA}
+            )
         else:
-            next_week_rows.append({"name": day_name, "risk_emoji": "🟢", "event": "Aucun evenement majeur identifie", "time": NA})
+            next_week_rows.append({"name": day_name, "risk_emoji": "🟢", "event": "Calendrier verifie : aucun evenement majeur", "time": NA})
 
     context = {
         "week": {
@@ -86,12 +92,19 @@ def build_weekly_context() -> dict:
                 "Desactiver le robot 15 minutes avant chaque case 🔴 du tableau ci-dessus et le reactiver "
                 "seulement apres confirmation de normalisation de la volatilite (ATR/amplitude M15), jamais "
                 "automatiquement a heure fixe."
+                + (
+                    " ATTENTION : calendrier non verifie cette semaine (aucune source configuree) - "
+                    "les cases 🟠 ci-dessus signifient \"non verifie\", pas \"sans risque\" : verifiez "
+                    "manuellement le calendrier (BLS/BEA/Fed, Investing.com) avant de programmer le robot."
+                    if not calendar_verified
+                    else ""
+                )
             )
         },
         "sources": [
             "Historique local des rapports quotidiens (data/history.db)",
-            "Trading Economics (calendrier)" if events else "Calendrier economique : non disponible",
-            f"FRED (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
+            "Trading Economics (calendrier)" if calendar_verified else "Calendrier economique : NON VERIFIE (aucune source configuree)",
+            f"FRED, observation quotidienne (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
             *INVESTING_COM_REFS,
         ],
     }

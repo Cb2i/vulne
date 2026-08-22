@@ -61,7 +61,9 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
     h1_atr_current, h1_atr_avg20 = atr_with_average(candles_to_df(h1_candles))
     m15_ratio = range_amplitude_ratio(candles_to_df(m15_candles))
 
-    calendar_events: list[CalendarEvent] = get_calendar()
+    calendar_result = get_calendar()
+    calendar_events = calendar_result.events
+    calendar_verified = calendar_result.verified
     events_montreal = []
     for ev in calendar_events:
         try:
@@ -84,6 +86,7 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
         next_major_event_dt=next_event[0] if next_event else None,
         now=now,
         is_major_event=bool(next_event),
+        calendar_verified=calendar_verified,
         atr14=h1_atr_current,
         atr_avg20=h1_atr_avg20,
         m15_amplitude_ratio=m15_ratio,
@@ -107,6 +110,7 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
         events_montreal=[(dt, ev) for dt, ev in events_montreal],
         day_start=now.replace(hour=0, minute=0, second=0, microsecond=0),
         day_end=now.replace(hour=23, minute=59, second=0, microsecond=0),
+        calendar_verified=calendar_verified,
     )
 
     context = {
@@ -131,7 +135,11 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
             ),
         },
         "next_event": {
-            "name": next_event[1].event if next_event else None,
+            "name": (
+                next_event[1].event
+                if next_event
+                else ("Non verifie (calendrier indisponible)" if not calendar_verified else "Aucun identifie")
+            ),
             "time_montreal": next_event[0].strftime("%H:%M") if next_event else None,
         },
         "current_window": {"range": "a determiner selon timeline", "reason": "voir section Risk Timeline"},
@@ -142,6 +150,12 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
         "executive_summary": (
             f"Tendance H1 {trend_label.lower() if trend_label != NA else NA}, "
             f"risque du jour {risk.level} ({risk.total_score}/10). {risk.explanation()}"
+            + (
+                " ATTENTION : calendrier economique non verifie (aucune source configuree) - "
+                "ce Risk Score peut sous-estimer le risque reel si un evenement majeur est prevu aujourd'hui."
+                if not calendar_verified
+                else ""
+            )
         ),
         "timeframes": [
             {
@@ -194,13 +208,26 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
         "points_to_monitor": [
             "Confirmer la normalisation de la volatilite avant de considerer une fenetre rouge comme terminee.",
             "Verifier les specifications XAUUSD.sc dans MT4 si la derniere verification date de plus de 7 jours.",
-        ],
+        ]
+        + (
+            [
+                "Calendrier economique non verifie (TRADING_ECONOMICS_API_KEY absente) : verifier manuellement "
+                "sur Investing.com/ForexFactory qu'aucun CPI/NFP/PCE/FOMC n'est prevu aujourd'hui avant de vous fier au Risk Score."
+            ]
+            if not calendar_verified
+            else []
+        ),
         "robot": {
             "stop_guidance": (
                 f"desactiver au plus tard {(next_event[0]).strftime('%H:%M') if next_event else NA} moins 15 minutes "
                 "si un evenement majeur est identifie dans la timeline (fenetre 🔴)."
                 if next_event
-                else "aucun arret specifique requis selon les evenements actuellement identifies."
+                else (
+                    "calendrier non verifie : impossible de garantir qu'aucun arret n'est necessaire, verifiez "
+                    "manuellement le calendrier avant d'activer le robot."
+                    if not calendar_verified
+                    else "aucun arret specifique requis selon les evenements actuellement identifies."
+                )
             ),
             "restart_guidance": (
                 "reactiver seulement lorsque la section Risk Timeline repasse a 🟢 ET que l'ATR/amplitude M15 "
@@ -208,9 +235,11 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
             ),
         },
         "sources": [
-            "Twelve Data (OHLC/indicateurs)" if tf_data["H1"]["snapshot"] else "Twelve Data : non disponible (cle API absente ou echec)",
-            "Trading Economics (calendrier)" if calendar_events else "Calendrier economique : non disponible",
-            f"FRED (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
+            "Twelve Data (OHLC/indicateurs, proxy XAU/USD spot - pas le flux XAUUSD.sc exact de PU Prime)"
+            if tf_data["H1"]["snapshot"]
+            else "Twelve Data : non disponible (cle API absente ou echec)",
+            "Trading Economics (calendrier)" if calendar_verified else "Calendrier economique : NON VERIFIE (aucune source configuree)",
+            f"FRED, observation quotidienne (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
             *INVESTING_COM_REFS,
         ],
         "generated_at": now.isoformat(),

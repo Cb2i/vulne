@@ -21,18 +21,34 @@ def build_risk_timeline(
     day_end: datetime,
     pre_event_minutes: int = 15,
     post_event_minutes: int = 45,
+    calendar_verified: bool = True,
 ) -> list[RiskTimelineEntry]:
     """
     events_montreal: liste de (heure_montreal, evenement). day_start/day_end
     delimitent la journee a couvrir. Retourne une timeline triee et fusionnee.
     Aucune heure n'est inventee : uniquement celles fournies par les evenements
     reels (calendrier officiel/Trading Economics/ForexFactory).
+
+    `calendar_verified` distingue "calendrier verifie, rien de majeur" (🟢,
+    affirmatif) de "aucune source de calendrier n'a repondu" (🟠, on ne sait
+    juste pas) : une liste d'evenements vide ne veut pas dire la meme chose
+    dans ces deux cas, et le rapport ne doit jamais laisser le second se
+    lire comme le premier.
     """
     segments: list[tuple[datetime, datetime, str, str]] = []
     major = [(dt, ev) for dt, ev in events_montreal if is_high_impact(ev.event)]
 
-    if not major:
-        segments.append((day_start, day_end, "🟢", "Aucune publication macro majeure identifiee"))
+    if not major and not calendar_verified:
+        segments.append(
+            (
+                day_start,
+                day_end,
+                "🟠",
+                "Calendrier economique non verifie (source indisponible) : presence d'un evenement majeur non confirmee",
+            )
+        )
+    elif not major:
+        segments.append((day_start, day_end, "🟢", "Calendrier verifie : aucune publication macro majeure identifiee"))
     else:
         cursor = day_start
         for dt, ev in sorted(major, key=lambda x: x[0]):

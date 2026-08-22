@@ -36,6 +36,13 @@ class CalendarEvent:
     source: str
 
 
+@dataclass
+class CalendarResult:
+    events: list[CalendarEvent]
+    verified: bool  # True si une source a reellement repondu (meme avec 0 evenement)
+    source: str | None  # nom de la source qui a repondu, None si aucune n'a repondu
+
+
 def _fetch_trading_economics(country: str, start: str, end: str) -> list[CalendarEvent] | None:
     api_key = get_secret("TRADING_ECONOMICS_API_KEY")
     if not api_key:
@@ -68,22 +75,27 @@ def _fetch_trading_economics(country: str, start: str, end: str) -> list[Calenda
     return events
 
 
-def get_calendar(country: str = "united states", start: str | None = None, end: str | None = None) -> list[CalendarEvent]:
+def get_calendar(country: str = "united states", start: str | None = None, end: str | None = None) -> CalendarResult:
     """
-    Retourne la liste des evenements connus. Liste vide si aucune source
-    n'a repondu : le rapport doit alors indiquer explicitement l'absence de
-    donnee calendrier verifiee plutot que d'improviser un evenement.
+    Retourne les evenements connus ET si une source a reellement repondu.
+
+    Important : une liste vide ne veut pas forcement dire "verifie, rien de
+    prevu aujourd'hui" - ca peut aussi vouloir dire "aucune source de
+    calendrier configuree, on n'a jamais verifie". Confondre les deux ferait
+    lire un Risk Score base sur "aucun evenement" comme une garantie alors
+    qu'il peut simplement n'avoir jamais ete verifie. `verified` distingue
+    explicitement les deux cas pour que le rapport ne les confonde pas.
     """
     now = datetime.now(timezone.utc)
     start = start or now.strftime("%Y-%m-%d")
     end = end or now.strftime("%Y-%m-%d")
     events = _fetch_trading_economics(country, start, end)
     if events is not None:
-        return events
+        return CalendarResult(events=events, verified=True, source="Trading Economics")
     # Fallback ForexFactory non branche par defaut (scraping non officiel) :
     # a activer explicitement dans une extension du projet si l'utilisateur
     # accepte les conditions d'utilisation de ForexFactory.
-    return []
+    return CalendarResult(events=[], verified=False, source=None)
 
 
 def is_high_impact(event_name: str) -> bool:

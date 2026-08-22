@@ -34,9 +34,16 @@ class RiskAssessment:
         return " | ".join(parts)
 
 
-def _event_proximity_score(next_event_dt: datetime | None, now: datetime, is_major: bool) -> RiskFactor:
+def _event_proximity_score(
+    next_event_dt: datetime | None, now: datetime, is_major: bool, calendar_verified: bool = True
+) -> RiskFactor:
     if next_event_dt is None or not is_major:
-        return RiskFactor("Proximite evenement macro", 0, 4, "aucun evenement majeur identifie")
+        if not calendar_verified:
+            return RiskFactor(
+                "Proximite evenement macro", 0, 4,
+                "calendrier non verifie (source indisponible) : score potentiellement sous-estime",
+            )
+        return RiskFactor("Proximite evenement macro", 0, 4, "calendrier verifie, aucun evenement majeur identifie")
     delta = next_event_dt - now
     if delta <= timedelta(0):
         return RiskFactor("Proximite evenement macro", 4, 4, "evenement majeur en cours/tres recent")
@@ -99,6 +106,7 @@ def compute_risk_score(
     next_major_event_dt: datetime | None,
     now: datetime,
     is_major_event: bool = True,
+    calendar_verified: bool = True,
     atr14: float | None = None,
     atr_avg20: float | None = None,
     m15_amplitude_ratio: float | None = None,
@@ -109,7 +117,7 @@ def compute_risk_score(
     confirmed_major_news: bool = False,
 ) -> RiskAssessment:
     factors = [
-        _event_proximity_score(next_major_event_dt, now, is_major_event),
+        _event_proximity_score(next_major_event_dt, now, is_major_event, calendar_verified),
         _atr_score(atr14, atr_avg20),
         _m15_amplitude_score(m15_amplitude_ratio),
         _session_score(in_session_overlap, in_single_session),
