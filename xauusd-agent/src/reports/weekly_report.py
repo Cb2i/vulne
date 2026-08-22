@@ -15,7 +15,7 @@ from ..collectors.economic_calendar import CalendarEvent, get_calendar, is_high_
 from ..collectors.fred_client import get_us_yields
 from ..storage import get_last_n_days
 from ..timezones import now_montreal
-from .formatting import NA, strip_forbidden_chars
+from .formatting import INVESTING_COM_REFS, NA, strip_forbidden_chars
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 DAY_NAMES_FR = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
@@ -92,6 +92,7 @@ def build_weekly_context() -> dict:
             "Historique local des rapports quotidiens (data/history.db)",
             "Trading Economics (calendrier)" if events else "Calendrier economique : non disponible",
             f"FRED (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
+            *INVESTING_COM_REFS,
         ],
     }
     return context

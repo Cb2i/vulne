@@ -20,7 +20,7 @@ from ..collectors.news import NewsItem
 from ..risk.risk_engine import compute_risk_score
 from ..risk.timeline import build_risk_timeline
 from ..timezones import now_montreal
-from .formatting import NA, fmt_list, fmt_num, strip_forbidden_chars
+from .formatting import INVESTING_COM_REFS, NA, fmt_list, fmt_num, strip_forbidden_chars
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -211,6 +211,7 @@ def build_daily_context(symbol: str = "XAU/USD") -> dict:
             "Twelve Data (OHLC/indicateurs)" if tf_data["H1"]["snapshot"] else "Twelve Data : non disponible (cle API absente ou echec)",
             "Trading Economics (calendrier)" if calendar_events else "Calendrier economique : non disponible",
             f"FRED (US10Y {us10y.date if us10y else NA}, US02Y {us02y.date if us02y else NA})",
+            *INVESTING_COM_REFS,
         ],
         "generated_at": now.isoformat(),
     }
