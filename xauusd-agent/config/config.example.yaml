@@ -1,0 +1,50 @@
+# Copier vers config/config.yaml et adapter.
+
+broker:
+  name: "PU Prime"
+  platform: "MT4"
+  symbol: "XAUUSD.sc"
+  primary_timeframe: "H1"
+  timeframes: ["D1", "H4", "H1", "M15"]
+
+timezone:
+  reference: "America/Montreal"
+  sessions:
+    asia: { zone: "Asia/Tokyo", open: "09:00", close: "18:00" }
+    london: { zone: "Europe/London", open: "08:00", close: "16:30" }
+    new_york: { zone: "America/New_York", open: "08:00", close: "17:00" }
+
+schedule:
+  # Cron en heure locale America/Montreal (converti automatiquement en UTC par le scheduler)
+  daily_report: "30 6 * * 1-5"      # lundi-vendredi 06:30
+  sunday_report: "0 10 * * 0"       # dimanche 10:00
+  weekly_report: "35 6 * * 5"       # vendredi, juste apres le rapport quotidien
+
+data_sources:
+  market_data:
+    provider: "twelve_data"
+    fallback: "alpha_vantage"
+    cache_ttl_seconds: 300
+  economic_calendar:
+    provider: "trading_economics"   # ou "forexfactory" si pas d'abonnement
+    fallback: "forexfactory"
+    cache_ttl_seconds: 21600
+  official_rates:
+    provider: "fred"
+    series: { us10y: "DGS10", us02y: "DGS2" }
+    cache_ttl_seconds: 86400
+
+risk_engine:
+  thresholds: { normal_max: 3, watch_max: 6, high_max: 9 }
+  atr_lookback_days: 20
+  normalization:
+    atr_ratio_max: 1.2
+    m15_range_ratio_max: 1.5
+
+storage:
+  history_db: "data/history.db"
+  cache_dir: "cache"
+
+report:
+  max_words: 900
+  forbidden_chars: ["—"]  # em dash interdit dans les rapports

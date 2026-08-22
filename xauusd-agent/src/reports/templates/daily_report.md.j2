@@ -1,0 +1,81 @@
+{# Gabarit du rapport quotidien. Ne jamais utiliser le caractere em dash "—" : utiliser "-". #}
+# 🤖 XAUUSD.sc - MARKET STATUS
+
+**Risk Score : {{ risk.total_score }}/10 {{ risk.emoji }}**
+**Tendance H1 : {{ h1.trend_emoji }} {{ h1.trend_label }}**
+**Volatilite : {{ risk.vol_emoji }} {{ risk.vol_label }}**
+**Prochain evenement majeur : {{ next_event.name or "Aucun identifie" }}{% if next_event.time_montreal %} - {{ next_event.time_montreal }} Montreal{% endif %}**
+**Fenetre de risque : {{ current_window.range }} - {{ current_window.reason }}**
+
+## RISQUE DU JOUR : {{ risk.emoji }} {{ risk.level | upper }} ({{ risk.total_score }}/10)
+{% for item in risk_summary_lines %}
+{{ item.emoji }} {{ item.range }} - {{ item.label }}
+{% endfor %}
+
+## 1. Executive Summary
+{{ executive_summary }}
+
+## 2. Technical Analysis (Daily -> H4 -> H1 -> M15)
+| Timeframe | Tendance | Structure | Momentum (RSI14) | Volatilite (ATR14) |
+|---|---|---|---|---|
+{% for tf in timeframes %}| {{ tf.name }} | {{ tf.trend }} | {{ tf.structure }} | {{ tf.rsi }} | {{ tf.atr }} |
+{% endfor %}
+
+EMA20 : {{ h1.ema20 }} | EMA50 : {{ h1.ema50 }} | EMA200 : {{ h1.ema200 }}
+MACD (H1) : {{ h1.macd }}
+
+## 3. Key Levels
+- Previous Day High : {{ levels.previous_day_high }}
+- Previous Day Low : {{ levels.previous_day_low }}
+- Weekly High : {{ levels.weekly_high }}
+- Weekly Low : {{ levels.weekly_low }}
+- Resistances : {{ levels.resistances }}
+- Supports : {{ levels.supports }}
+- Zones psychologiques : {{ levels.psychological }}
+
+## 4. Market Sessions (heure Montreal, DST prise en compte)
+🌏 Asie : {{ sessions.asia }}
+🇬🇧 Londres : {{ sessions.london }}
+🇺🇸 New York : {{ sessions.new_york }}
+⚡ Chevauchement Londres/New York : {{ sessions.overlap_london_ny }}
+
+## 5. Economic Calendar (heure Montreal)
+| Heure | Evenement | Importance | Consensus | Precedent | Resultat | Impact potentiel XAU/USD |
+|---|---|---|---|---|---|---|
+{% for ev in calendar %}| {{ ev.time }} | {{ ev.name }} | {{ ev.importance }} | {{ ev.consensus }} | {{ ev.previous }} | {{ ev.actual }} | {{ ev.impact }} |
+{% endfor %}
+
+## 6. DXY & Treasury Yields
+- DXY : {{ macro.dxy }}
+- US10Y : {{ macro.us10y }} (source : FRED, {{ macro.us10y_date }})
+- US02Y : {{ macro.us02y }} (source : FRED, {{ macro.us02y_date }})
+- Lecture contextuelle (non une regle absolue) : {{ macro.context_note }}
+
+## 7. Important News
+{% for n in news %}- {{ n.summary }} (Source : {{ n.source }}, {{ n.published_at }}) - Impact potentiel : {{ n.potential_impact }} - Confiance : {{ n.confidence }}
+{% endfor %}
+{% if not news %}- Aucune actualite majeure confirmee au moment de la generation du rapport.
+{% endif %}
+
+## 8. Risk Timeline
+| Heure Montreal | Niveau | Raison |
+|---|---|---|
+{% for entry in timeline %}| {{ entry.start_montreal }} - {{ entry.end_montreal }} | {{ entry.level }} | {{ entry.reason }} |
+{% endfor %}
+
+## 9. Points to Monitor
+{% for point in points_to_monitor %}- {{ point }}
+{% endfor %}
+
+**Recommandation robot EA (a valider par vous-meme, pas un ordre) :**
+- Arret suggere : {{ robot.stop_guidance }}
+- Reprise suggeree : {{ robot.restart_guidance }}
+
+## 10. Sources
+{% for s in sources %}- {{ s }}
+{% endfor %}
+
+---
+Ce rapport est une veille de marche et une analyse de risque. Il ne constitue pas
+un conseil en investissement, ne garantit aucun rendement et ne declenche aucun
+ordre. Decision finale : vous seul.
