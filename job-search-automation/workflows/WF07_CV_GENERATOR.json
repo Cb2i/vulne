@@ -1,0 +1,440 @@
+{
+  "name": "WF07_CV_GENERATOR",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF07_CV_GENERATOR\n\n**Objectif** : générer le PDF du CV optimisé (nommage §25), générer une lettre de motivation SEULEMENT si requise (§26), stocker sur OneDrive (`/JobAgent/GeneratedCV/YYYY/MM/`, `/JobAgent/CoverLetters/`), créer l'enregistrement `CVVersions`.\n\n⚠️ La conversion HTML→PDF utilise la fonctionnalité de conversion de format de Microsoft Graph (`?format=pdf`). Vérifiez les noms exacts des paramètres OneDrive/Extract From File selon votre version n8n installée — ils évoluent fréquemment.",
+        "height": 300,
+        "width": 480
+      },
+      "id": "sticky_wf07",
+      "name": "Objectif_WF07",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -280]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf07",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "function sanitize(v) {\n  return String(v || '').normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');\n}\n\nconst j = $json;\nconst now = new Date();\nconst yyyy = now.getFullYear();\nconst mm = String(now.getMonth() + 1).padStart(2, '0');\nconst dd = String(now.getDate()).padStart(2, '0');\nconst cv_file_name = `CV_Aboubacar_${sanitize(j.company)}_${sanitize(j.title)}_${yyyy}${mm}${dd}.pdf`;\nconst cl_file_name = `CoverLetter_Aboubacar_${sanitize(j.company)}_${sanitize(j.title)}_${yyyy}${mm}${dd}.pdf`;\nconst cv_folder_path = `${$vars.ONEDRIVE_ROOT_FOLDER || '/JobAgent'}/GeneratedCV/${yyyy}/${mm}`;\nconst cl_folder_path = `${$vars.ONEDRIVE_ROOT_FOLDER || '/JobAgent'}/CoverLetters/${yyyy}/${mm}`;\n\nreturn [{ json: { ...j, cv_file_name, cl_file_name, cv_folder_path, cl_folder_path } }];"
+      },
+      "id": "build_cv_filename",
+      "name": "Build_CV_Filename",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst s = j.cv_optimization.cv_sections;\nconst esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst bulletsHtml = (bullets) => (bullets || []).map(b => `<li>${esc(b)}</li>`).join('');\nconst expHtml = (s.experience || []).map(e => `<h3>${esc(e.title)} — ${esc(e.company)}</h3><p class=\"period\">${esc(e.period)}</p><ul>${bulletsHtml(e.bullets)}</ul>`).join('');\n\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><style>\nbody{font-family:Calibri,Arial,sans-serif;font-size:11pt;color:#1a1a1a;margin:32px;}\nh1{font-size:18pt;margin-bottom:4px;}\nh2{font-size:13pt;border-bottom:1px solid #444;margin-top:20px;}\nh3{font-size:11.5pt;margin-bottom:2px;}\n.period{font-style:italic;color:#555;margin-top:0;}\nul{margin-top:4px;}\n</style></head><body>\n<h1>Aboubacar — ${esc(j.cv_optimization.language_used)}</h1>\n<h2>Profil professionnel</h2><p>${esc(s.professional_summary)}</p>\n<h2>Compétences</h2><p>${esc((s.skills || []).join(' • '))}</p>\n<h2>Expérience</h2>${expHtml}\n<h2>Certifications</h2><p>${esc((s.certifications || []).join(' • '))}</p>\n<h2>Formation</h2><p>${esc((s.education || []).join(' • '))}</p>\n</body></html>`;\n\nreturn [{ json: { ...j, cv_html: html } }];"
+      },
+      "id": "render_cv_html",
+      "name": "Render_CV_HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 60]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "cv_html",
+        "options": { "fileName": "={{ $json.cv_file_name.replace('.pdf', '.html') }}", "mimeType": "text/html" }
+      },
+      "id": "convert_cv_html_to_binary",
+      "name": "Convert_CV_HTML_To_Binary",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [440, 60]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "fileName": "={{ $('Build_CV_Filename').first().json.cv_file_name.replace('.pdf', '.html') }}",
+        "parentFolderId": {
+          "__rl": true,
+          "value": "={{ $('Build_CV_Filename').first().json.cv_folder_path }}",
+          "mode": "id"
+        },
+        "binaryDataUpload": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "upload_cv_html_temp",
+      "name": "Upload_CV_HTML_Temp",
+      "type": "n8n-nodes-base.microsoftOneDrive",
+      "typeVersion": 1,
+      "position": [680, 60],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/drive/items/' + $json.id + '/content?format=pdf' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOneDriveOAuth2Api",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "convert_cv_to_pdf",
+      "name": "Convert_CV_To_PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 60],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "fileName": "={{ $('Build_CV_Filename').first().json.cv_file_name }}",
+        "parentFolderId": {
+          "__rl": true,
+          "value": "={{ $('Build_CV_Filename').first().json.cv_folder_path }}",
+          "mode": "id"
+        },
+        "binaryDataUpload": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "upload_cv_pdf_final",
+      "name": "Upload_CV_PDF_Final",
+      "type": "n8n-nodes-base.microsoftOneDrive",
+      "typeVersion": 1,
+      "position": [1160, 60],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Build_CV_Filename').first().json;\nconst text = (job.description || '').toLowerCase();\nconst coverLetterRequired = text.includes('cover letter') || text.includes('lettre de motivation') || text.includes('letter of motivation') || text.includes('motivation letter');\nreturn [{ json: { ...job, cv_onedrive_path: $json.webUrl || $json.id, cover_letter_required: coverLetterRequired } }];"
+      },
+      "id": "determine_cover_letter_required",
+      "name": "Determine_Cover_Letter_Required",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_cl_required",
+              "leftValue": "={{ $json.cover_letter_required }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_cover_letter_required",
+      "name": "IF_Cover_Letter_Required",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1640, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst systemPrompt = `Tu es un rédacteur de lettre de motivation pour une candidature en cybersécurité. Personnalise: entreprise, poste, principales exigences, compétences pertinentes RÉELLEMENT possédées (fournies), motivation professionnelle. N'invente AUCUNE information absente du CV maître ou de la recherche entreprise fournie. Longueur: 250-350 mots. Réponds UNIQUEMENT en JSON: {\\\"cover_letter_text\\\": string}.`;\nconst userMessage = JSON.stringify({ company: j.company, title: j.title, job_description: j.description, cv_sections: j.cv_optimization.cv_sections, company_research: j.company_research || {} });\nreturn [{ json: { ...j, cl_system_prompt: systemPrompt, cl_user_message: userMessage } }];"
+      },
+      "id": "build_cover_letter_request",
+      "name": "Build_Cover_Letter_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 1200, system: $json.cl_system_prompt, messages: [{ role: 'user', content: $json.cl_user_message }] }) }}",
+        "options": {}
+      },
+      "id": "call_claude_cover_letter",
+      "name": "Call_Claude_Cover_Letter",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2120, -80],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const job = $('Build_Cover_Letter_Request').first().json;\n  let text = '';\n  try {\n    const textBlock = (body.content || []).find(c => c.type === 'text');\n    const parsed = JSON.parse(textBlock ? textBlock.text : '{}');\n    text = parsed.cover_letter_text || textBlock?.text || '';\n  } catch (e) { text = (body.content && body.content[0] && body.content[0].text) || ''; }\n  return { json: { ...job, cover_letter_text: text } };\n});"
+      },
+      "id": "parse_cover_letter_response",
+      "name": "Parse_Cover_Letter_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst paragraphs = (j.cover_letter_text || '').split(/\\n+/).map(p => `<p>${esc(p)}</p>`).join('');\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><style>body{font-family:Calibri,Arial,sans-serif;font-size:11pt;margin:40px;line-height:1.5;}</style></head><body>${paragraphs}</body></html>`;\nreturn [{ json: { ...j, cl_html: html } }];"
+      },
+      "id": "render_cover_letter_html",
+      "name": "Render_Cover_Letter_HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, -80]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "cl_html",
+        "options": { "fileName": "={{ $json.cl_file_name.replace('.pdf', '.html') }}", "mimeType": "text/html" }
+      },
+      "id": "convert_cl_html_to_binary",
+      "name": "Convert_CL_HTML_To_Binary",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [2840, -80]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "fileName": "={{ $('Build_Cover_Letter_Request').first().json.cl_file_name.replace('.pdf', '.html') }}",
+        "parentFolderId": {
+          "__rl": true,
+          "value": "={{ $('Build_Cover_Letter_Request').first().json.cl_folder_path }}",
+          "mode": "id"
+        },
+        "binaryDataUpload": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "upload_cl_html_temp",
+      "name": "Upload_CL_HTML_Temp",
+      "type": "n8n-nodes-base.microsoftOneDrive",
+      "typeVersion": 1,
+      "position": [3080, -80],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ 'https://graph.microsoft.com/v1.0/me/drive/items/' + $json.id + '/content?format=pdf' }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "microsoftOneDriveOAuth2Api",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "convert_cl_to_pdf",
+      "name": "Convert_CL_To_PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3320, -80],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "upload",
+        "fileName": "={{ $('Build_Cover_Letter_Request').first().json.cl_file_name }}",
+        "parentFolderId": {
+          "__rl": true,
+          "value": "={{ $('Build_Cover_Letter_Request').first().json.cl_folder_path }}",
+          "mode": "id"
+        },
+        "binaryDataUpload": true,
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "upload_cl_pdf_final",
+      "name": "Upload_CL_PDF_Final",
+      "type": "n8n-nodes-base.microsoftOneDrive",
+      "typeVersion": 1,
+      "position": [3560, -80],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $('Build_Cover_Letter_Request').first().json;\nreturn [{ json: { ...job, cl_onedrive_path: $json.webUrl || $json.id } }];"
+      },
+      "id": "capture_cover_letter_path",
+      "name": "Capture_Cover_Letter_Path",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3800, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $json;\nreturn [{ json: { ...job, cl_onedrive_path: null } }];"
+      },
+      "id": "skip_cover_letter",
+      "name": "Skip_Cover_Letter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, 220]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "CVVersions", "mode": "list", "cachedResultName": "CVVersions" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "cv_version_id": "={{ $json.job_id + '-' + Date.now() }}",
+            "job_id": "={{ $json.job_id }}",
+            "language": "={{ $json.cv_optimization.language_used }}",
+            "file_name": "={{ $json.cv_file_name }}",
+            "onedrive_path": "={{ $json.cv_onedrive_path }}",
+            "base_ats_score": "={{ $json.cv_optimization.base_ats_score }}",
+            "optimized_ats_score": "={{ $json.cv_optimization.optimized_ats_score }}",
+            "iterations": "={{ $json.cv_iterations }}",
+            "changes_summary": "={{ $json.cv_optimization.changes_summary }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "create_cv_version_record",
+      "name": "Create_CV_Version_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [4040, 60],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF08_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF08_APPLICATION_AGENT"
+        },
+        "options": {}
+      },
+      "id": "call_wf08_application_agent",
+      "name": "Call_WF08_Application_Agent",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [4280, 60]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Build_CV_Filename", "type": "main", "index": 0 }]]
+    },
+    "Build_CV_Filename": {
+      "main": [[{ "node": "Render_CV_HTML", "type": "main", "index": 0 }]]
+    },
+    "Render_CV_HTML": {
+      "main": [[{ "node": "Convert_CV_HTML_To_Binary", "type": "main", "index": 0 }]]
+    },
+    "Convert_CV_HTML_To_Binary": {
+      "main": [[{ "node": "Upload_CV_HTML_Temp", "type": "main", "index": 0 }]]
+    },
+    "Upload_CV_HTML_Temp": {
+      "main": [[{ "node": "Convert_CV_To_PDF", "type": "main", "index": 0 }]]
+    },
+    "Convert_CV_To_PDF": {
+      "main": [[{ "node": "Upload_CV_PDF_Final", "type": "main", "index": 0 }]]
+    },
+    "Upload_CV_PDF_Final": {
+      "main": [[{ "node": "Determine_Cover_Letter_Required", "type": "main", "index": 0 }]]
+    },
+    "Determine_Cover_Letter_Required": {
+      "main": [[{ "node": "IF_Cover_Letter_Required", "type": "main", "index": 0 }]]
+    },
+    "IF_Cover_Letter_Required": {
+      "main": [
+        [{ "node": "Build_Cover_Letter_Request", "type": "main", "index": 0 }],
+        [{ "node": "Skip_Cover_Letter", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build_Cover_Letter_Request": {
+      "main": [[{ "node": "Call_Claude_Cover_Letter", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Cover_Letter": {
+      "main": [[{ "node": "Parse_Cover_Letter_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_Cover_Letter_Response": {
+      "main": [[{ "node": "Render_Cover_Letter_HTML", "type": "main", "index": 0 }]]
+    },
+    "Render_Cover_Letter_HTML": {
+      "main": [[{ "node": "Convert_CL_HTML_To_Binary", "type": "main", "index": 0 }]]
+    },
+    "Convert_CL_HTML_To_Binary": {
+      "main": [[{ "node": "Upload_CL_HTML_Temp", "type": "main", "index": 0 }]]
+    },
+    "Upload_CL_HTML_Temp": {
+      "main": [[{ "node": "Convert_CL_To_PDF", "type": "main", "index": 0 }]]
+    },
+    "Convert_CL_To_PDF": {
+      "main": [[{ "node": "Upload_CL_PDF_Final", "type": "main", "index": 0 }]]
+    },
+    "Upload_CL_PDF_Final": {
+      "main": [[{ "node": "Capture_Cover_Letter_Path", "type": "main", "index": 0 }]]
+    },
+    "Capture_Cover_Letter_Path": {
+      "main": [[{ "node": "Create_CV_Version_Record", "type": "main", "index": 0 }]]
+    },
+    "Skip_Cover_Letter": {
+      "main": [[{ "node": "Create_CV_Version_Record", "type": "main", "index": 0 }]]
+    },
+    "Create_CV_Version_Record": {
+      "main": [[{ "node": "Call_WF08_Application_Agent", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

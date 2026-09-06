@@ -1,0 +1,99 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "JobAnalyzerOutput",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "job_id",
+    "scores",
+    "overall_score",
+    "classification",
+    "interview_probability",
+    "blocking_reasons",
+    "already_applied",
+    "reason",
+    "model"
+  ],
+  "properties": {
+    "job_id": { "type": "string" },
+    "scores": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "technical_match",
+        "experience_match",
+        "technologies_match",
+        "seniority_match",
+        "location_match",
+        "ats_match",
+        "language_match",
+        "salary_match"
+      ],
+      "properties": {
+        "technical_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "experience_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "technologies_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "seniority_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "location_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "ats_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "language_match": { "type": "number", "minimum": 0, "maximum": 100 },
+        "salary_match": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "overall_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "classification": {
+      "type": "string",
+      "enum": ["PRIORITY", "APPLY", "MANUAL_REVIEW", "REJECT"]
+    },
+    "interview_probability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["score", "label"],
+      "properties": {
+        "score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "label": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "VERY_HIGH"] }
+      }
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "location_incompatible",
+          "onsite_required_outside_quebec",
+          "canada_not_accepted",
+          "clearance_required",
+          "not_cybersecurity",
+          "student_internship",
+          "salary_below_threshold",
+          "already_applied",
+          "expired"
+        ]
+      }
+    },
+    "already_applied": { "type": "boolean" },
+    "extracted_salary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "salary_min": { "type": ["number", "null"] },
+        "salary_max": { "type": ["number", "null"] },
+        "salary_currency": { "type": ["string", "null"] },
+        "bonus": { "type": ["string", "null"] },
+        "pension": { "type": ["string", "null"] },
+        "benefits": { "type": ["string", "null"] },
+        "equity": { "type": ["string", "null"] },
+        "vacation": { "type": ["string", "null"] }
+      }
+    },
+    "discovered_title_variants": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Nouveaux titres de poste équivalents découverts par l'agent, à ajouter au dictionnaire de recherche."
+    },
+    "notes": { "type": "string", "description": "Éléments INFERRED ou remarques additionnelles, jamais présentés comme faits." },
+    "reason": { "type": "string", "description": "Explication concise et auditable de la décision (1-3 phrases)." },
+    "model": { "type": "string" }
+  }
+}

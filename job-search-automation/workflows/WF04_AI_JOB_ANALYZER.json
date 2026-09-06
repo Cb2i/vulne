@@ -1,0 +1,460 @@
+{
+  "name": "WF04_AI_JOB_ANALYZER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF04_AI_JOB_ANALYZER\n\n**Objectif** : scorer l'offre avec Claude (JOB_ANALYZER), obtenir un second avis OpenAI si `overall_score >= 70`, ré-analyser avec Claude si l'écart dépasse 10 points, consolider, journaliser (AgentRuns) et router selon la classification.\n\nPrompt complet : `/prompts/01-job-analyzer.md`. Schéma : `/schemas/job_analyzer.schema.json`.\n\n**Sortie** : QUALIFIED (PRIORITY/APPLY) → WF05. MANUAL_REVIEW / REJECT → arrêt journalisé.",
+        "height": 300,
+        "width": 460
+      },
+      "id": "sticky_wf04",
+      "name": "Objectif_WF04",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -260]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf04",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const j = item.json;\n  const fields = j.fields || j;\n  return { json: { job_record_id: j.id || null, ...fields } };\n});"
+      },
+      "id": "flatten_job_record",
+      "name": "Flatten_Job_Record",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, -40]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_application_history",
+      "name": "Get_Application_History",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [-40, 160],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $json;\nconst history = $('Get_Application_History').all().map(i => ({ company: i.json.fields?.company, title: i.json.fields?.title }));\n\nconst candidateProfile = {\n  domain: 'Cybersécurité',\n  priority_technologies: ['Microsoft Sentinel','Microsoft Defender XDR','Microsoft Defender for Endpoint','Microsoft Defender for Cloud','Microsoft Defender Vulnerability Management','Microsoft Entra ID','Microsoft Intune','Microsoft Azure','Microsoft Purview','KQL','Logic Apps','SOAR','Tenable'],\n  secondary_technologies: ['CrowdStrike','Palo Alto','AWS Security','QRadar','SIEM','EDR','XDR','IAM','PAM','CSPM','Vulnerability Management'],\n  seniority_target: ['Senior','Architecte'],\n  languages: { french: 'native', english: 'professional_intermediate' },\n  home_city: $vars.HOME_CITY || 'Quebec City',\n  home_province: $vars.HOME_PROVINCE || 'Quebec',\n  accepts_occasional_travel_per_year: parseInt($vars.MAX_OCCASIONAL_TRIPS_PER_YEAR || '4', 10)\n};\n\nconst masterCvSummary = {\n  note: 'REMPLACER par un export structuré réel du CV maître FR/EN (compétences, expériences, certifications, projets).',\n  source: 'master_cv_fr / master_cv_en'\n};\n\nconst systemPrompt = `Tu es JOB_ANALYZER, un agent d'analyse d'offres d'emploi en cybersécurité dans un pipeline n8n automatisé. Réponds EXCLUSIVEMENT via l'outil return_job_analysis, jamais en texte libre.\nTechnologies prioritaires: ${candidateProfile.priority_technologies.join(', ')}.\nTechnologies secondaires (jamais éliminatoires seules): ${candidateProfile.secondary_technologies.join(', ')}.\nNe rejette jamais une offre uniquement parce qu'elle demande 1-2 technologies différentes.\nUtilise une recherche sémantique de titres FR/EN (Analyste SOC, Security Analyst, Threat Hunter, Security Engineer/Architect, etc.), découvre aussi des variantes plausibles (discovered_title_variants).\nPriorité séniorité: Senior, Architecte; un poste intermédiaire reste valorisable si rémunération/portée/évolution le justifient.\nRègles de localisation strictes: Ville de Québec = onsite/hybride/remote OK; reste du Québec = priorité remote (présence occasionnelle OK); Montréal = remote + présence occasionnelle (~1x/mois) OK; reste du Canada = remote uniquement; USA = accepter SEULEMENT si Canada/remote Canada explicitement mentionné, ne jamais le supposer. Déplacements occasionnels 2-4/an acceptables.\nEmploi: priorité permanent temps plein, accepter aussi temps partiel soir.\nCote de sécurité: exclure si obligatoire et non détenue/non obtenable; 'eligible to obtain' n'est pas bloquant.\nLangues: bilingue FR/EN, anglais professionnel INTERMÉDIAIRE seulement - ne jamais exagérer.\nSalaire absent ne doit jamais pénaliser le score (salary_match neutre).\nblocking_reasons possibles: location_incompatible, onsite_required_outside_quebec, canada_not_accepted, clearance_required, not_cybersecurity, student_internship, salary_below_threshold, already_applied, expired.\nPondérations overall_score: technique 30%, expérience 20%, technologies 15%, séniorité 10%, localisation 10%, ATS 10%, langues 5%.\nClassification: 80-100 PRIORITY, 70-79 APPLY, 60-69 MANUAL_REVIEW, 0-59 REJECT. Un blocking_reason force REJECT ou MANUAL_REVIEW même si score élevé.\ninterview_probability: score 0-100 + label LOW/MEDIUM/HIGH/VERY_HIGH, jamais présenté comme certitude statistique.\nAnti-hallucination: n'affirme jamais une compétence/certification absente du CV maître fourni; marque les déductions comme INFERRED dans notes, jamais comme fait acquis.\nreason: 1-3 phrases concises et auditables.`;\n\nconst userMessage = JSON.stringify({\n  job_offer: job,\n  candidate_profile: candidateProfile,\n  master_cv_summary: masterCvSummary,\n  application_history: history\n});\n\nreturn [{ json: { ...job, system_prompt: systemPrompt, user_message: userMessage } }];"
+      },
+      "id": "build_job_analyzer_request",
+      "name": "Build_Job_Analyzer_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, -40]
+    },
+    {
+      "parameters": {
+        "type": "SHA256",
+        "value": "={{ $json.user_message }}",
+        "dataPropertyName": "input_hash",
+        "encoding": "hex"
+      },
+      "id": "compute_input_hash",
+      "name": "Compute_Input_Hash",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [440, -40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 2000, system: $json.system_prompt, messages: [{ role: 'user', content: $json.user_message }], tools: [{ name: 'return_job_analysis', description: 'Retourne l\\'analyse structurée de l\\'offre', input_schema: { type: 'object', required: ['job_id','scores','overall_score','classification','interview_probability','blocking_reasons','already_applied','reason','model'], properties: { job_id: { type: 'string' }, scores: { type: 'object' }, overall_score: { type: 'number' }, classification: { type: 'string', enum: ['PRIORITY','APPLY','MANUAL_REVIEW','REJECT'] }, interview_probability: { type: 'object' }, blocking_reasons: { type: 'array', items: { type: 'string' } }, already_applied: { type: 'boolean' }, extracted_salary: { type: 'object' }, discovered_title_variants: { type: 'array', items: { type: 'string' } }, notes: { type: 'string' }, reason: { type: 'string' }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_job_analysis' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_job_analyzer",
+      "name": "Call_Claude_Job_Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, -40],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const analysis = toolUse ? toolUse.input : {};\n  const job = $('Build_Job_Analyzer_Request').first().json;\n  return { json: { ...job, claude_analysis: { ...analysis, model: body.model } } };\n});"
+      },
+      "id": "parse_claude_response",
+      "name": "Parse_Claude_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, -40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_score_ge_70",
+              "leftValue": "={{ $json.claude_analysis.overall_score }}",
+              "rightValue": "={{ parseInt($vars.SECOND_OPINION_SCORE_THRESHOLD || '70', 10) }}",
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_score_gte_70",
+      "name": "IF_Score_GTE_70",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1160, -40]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst reviewSystemPrompt = `Tu es un REVIEWER OpenAI dans un pipeline de recherche d'emploi cybersécurité. Tu reçois une offre d'emploi et l'évaluation de Claude (JOB_ANALYZER). Cherche activement: erreur de scoring, compétence prétendument possédée mais absente du CV, mauvaise interprétation, critère obligatoire manquant, problème de localisation, hallucination. Réponds UNIQUEMENT en JSON: {\\\"overall_score\\\": number, \\\"issues_found\\\": string[], \\\"corrected_blocking_reasons\\\": string[], \\\"agrees_with_claude\\\": boolean, \\\"reason\\\": string}.`;\nconst reviewUserMessage = JSON.stringify({ job_offer: { title: j.title, company: j.company, description: j.description, location: j.location, work_mode: j.work_mode }, claude_analysis: j.claude_analysis });\nreturn [{ json: { ...j, review_system_prompt: reviewSystemPrompt, review_user_message: reviewUserMessage } }];"
+      },
+      "id": "build_openai_reviewer_request",
+      "name": "Build_OpenAI_Reviewer_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, -160]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.OPENAI_MODEL || 'gpt-4.1', response_format: { type: 'json_object' }, messages: [ { role: 'system', content: $json.review_system_prompt }, { role: 'user', content: $json.review_user_message } ] }) }}",
+        "options": {}
+      },
+      "id": "call_openai_reviewer",
+      "name": "Call_OpenAI_Reviewer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, -160],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const job = $('Build_OpenAI_Reviewer_Request').first().json;\n  let review = {};\n  try { review = JSON.parse(body.choices[0].message.content); } catch (e) { review = { overall_score: job.claude_analysis.overall_score, issues_found: ['parse_error'], agrees_with_claude: true, reason: 'Fallback: réponse OpenAI non parsable' }; }\n  const divergence = Math.abs((review.overall_score ?? job.claude_analysis.overall_score) - job.claude_analysis.overall_score);\n  return { json: { ...job, openai_review: review, score_divergence: divergence } };\n});"
+      },
+      "id": "parse_openai_response",
+      "name": "Parse_OpenAI_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, -160]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_divergence_gt_10",
+              "leftValue": "={{ $json.score_divergence }}",
+              "rightValue": "={{ parseInt($vars.SECOND_OPINION_DIVERGENCE_THRESHOLD || '10', 10) }}",
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_divergence_gt_10",
+      "name": "IF_Divergence_GT_10",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2120, -160]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst secondSystemPrompt = j.system_prompt + '\\n\\nATTENTION: Une 2e analyse est demandée car un reviewer OpenAI diverge de plus de 10 points de ta première évaluation. Reconsidère ton scoring à la lumière de ses observations, sans supposer que le reviewer a automatiquement raison.';\nconst secondUserMessage = JSON.stringify({ original_analysis: j.claude_analysis, openai_review: j.openai_review, job_offer: { title: j.title, company: j.company, description: j.description, location: j.location, work_mode: j.work_mode } });\nreturn [{ json: { ...j, second_system_prompt: secondSystemPrompt, second_user_message: secondUserMessage } }];"
+      },
+      "id": "build_claude_second_analysis_request",
+      "name": "Build_Claude_Second_Analysis_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, -260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "anthropic-version", "value": "2023-06-01" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 2000, system: $json.second_system_prompt, messages: [{ role: 'user', content: $json.second_user_message }], tools: [{ name: 'return_job_analysis', description: 'Retourne l\\'analyse structurée révisée de l\\'offre', input_schema: { type: 'object', required: ['job_id','scores','overall_score','classification','interview_probability','blocking_reasons','already_applied','reason','model'], properties: { job_id: { type: 'string' }, scores: { type: 'object' }, overall_score: { type: 'number' }, classification: { type: 'string', enum: ['PRIORITY','APPLY','MANUAL_REVIEW','REJECT'] }, interview_probability: { type: 'object' }, blocking_reasons: { type: 'array', items: { type: 'string' } }, already_applied: { type: 'boolean' }, notes: { type: 'string' }, reason: { type: 'string' }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_job_analysis' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_second_analysis",
+      "name": "Call_Claude_Second_Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2600, -260],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const analysis = toolUse ? toolUse.input : {};\n  const job = $('Build_Claude_Second_Analysis_Request').first().json;\n  return { json: { ...job, final_analysis: { ...analysis, model: body.model }, second_opinion_used: true } };\n});"
+      },
+      "id": "consolidate_from_second_analysis",
+      "name": "Consolidate_From_Second_Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2840, -260]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nreturn [{ json: { ...j, final_analysis: j.claude_analysis, second_opinion_used: !!j.openai_review } }];"
+      },
+      "id": "consolidate_without_second_analysis",
+      "name": "Consolidate_Without_Second_Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, 60]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agent_name": "JOB_ANALYZER",
+            "model": "={{ $json.final_analysis.model }}",
+            "job_id": "={{ $json.job_id }}",
+            "input_hash": "={{ $json.input_hash }}",
+            "score": "={{ $json.final_analysis.overall_score }}",
+            "decision": "={{ $json.final_analysis.classification }}",
+            "reason": "={{ $json.final_analysis.reason }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log_agent_run",
+      "name": "Log_Agent_Run",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [3080, -100],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Jobs", "mode": "list", "cachedResultName": "Jobs" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["id"],
+          "value": {
+            "id": "={{ $json.job_record_id }}",
+            "overall_score": "={{ $json.final_analysis.overall_score }}",
+            "technical_score": "={{ $json.final_analysis.scores.technical_match }}",
+            "experience_score": "={{ $json.final_analysis.scores.experience_match }}",
+            "ats_score": "={{ $json.final_analysis.scores.ats_match }}",
+            "location_score": "={{ $json.final_analysis.scores.location_match }}",
+            "interview_probability": "={{ $json.final_analysis.interview_probability.score }}",
+            "classification": "={{ $json.final_analysis.classification }}",
+            "status": "ANALYZED",
+            "blocking_reasons": "={{ $json.final_analysis.blocking_reasons }}",
+            "rejection_reason": "={{ $json.final_analysis.classification === 'REJECT' ? $json.final_analysis.reason : '' }}",
+            "second_opinion_used": "={{ $json.second_opinion_used || false }}",
+            "second_opinion_divergence": "={{ $json.score_divergence || 0 }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update_job_with_scores",
+      "name": "Update_Job_With_Scores",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [3080, 60],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.final_analysis.classification }}", "rightValue": "PRIORITY", "operator": { "type": "string", "operation": "equals" } }], "combinator": "or" }, "outputKey": "QUALIFIED" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.final_analysis.classification }}", "rightValue": "APPLY", "operator": { "type": "string", "operation": "equals" } }], "combinator": "or" }, "outputKey": "QUALIFIED" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.final_analysis.classification }}", "rightValue": "MANUAL_REVIEW", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "MANUAL_REVIEW" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.final_analysis.classification }}", "rightValue": "REJECT", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "REJECT" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch_classification",
+      "name": "Switch_Classification",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [3320, -20]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF05_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF05_COMPANY_RESEARCH"
+        },
+        "options": {}
+      },
+      "id": "call_wf05_company_research",
+      "name": "Call_WF05_Company_Research",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [3560, -180]
+    },
+    {
+      "parameters": {},
+      "id": "mark_manual_review",
+      "name": "Mark_Manual_Review_Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3560, 0]
+    },
+    {
+      "parameters": {},
+      "id": "mark_rejected",
+      "name": "Mark_Rejected_Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [3560, 180]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [
+        [
+          { "node": "Flatten_Job_Record", "type": "main", "index": 0 },
+          { "node": "Get_Application_History", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Flatten_Job_Record": {
+      "main": [[{ "node": "Build_Job_Analyzer_Request", "type": "main", "index": 0 }]]
+    },
+    "Build_Job_Analyzer_Request": {
+      "main": [[{ "node": "Compute_Input_Hash", "type": "main", "index": 0 }]]
+    },
+    "Compute_Input_Hash": {
+      "main": [[{ "node": "Call_Claude_Job_Analyzer", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Job_Analyzer": {
+      "main": [[{ "node": "Parse_Claude_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_Claude_Response": {
+      "main": [[{ "node": "IF_Score_GTE_70", "type": "main", "index": 0 }]]
+    },
+    "IF_Score_GTE_70": {
+      "main": [
+        [{ "node": "Build_OpenAI_Reviewer_Request", "type": "main", "index": 0 }],
+        [{ "node": "Consolidate_Without_Second_Analysis", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build_OpenAI_Reviewer_Request": {
+      "main": [[{ "node": "Call_OpenAI_Reviewer", "type": "main", "index": 0 }]]
+    },
+    "Call_OpenAI_Reviewer": {
+      "main": [[{ "node": "Parse_OpenAI_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_OpenAI_Response": {
+      "main": [[{ "node": "IF_Divergence_GT_10", "type": "main", "index": 0 }]]
+    },
+    "IF_Divergence_GT_10": {
+      "main": [
+        [{ "node": "Build_Claude_Second_Analysis_Request", "type": "main", "index": 0 }],
+        [{ "node": "Consolidate_Without_Second_Analysis", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build_Claude_Second_Analysis_Request": {
+      "main": [[{ "node": "Call_Claude_Second_Analysis", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Second_Analysis": {
+      "main": [[{ "node": "Consolidate_From_Second_Analysis", "type": "main", "index": 0 }]]
+    },
+    "Consolidate_From_Second_Analysis": {
+      "main": [[{ "node": "Log_Agent_Run", "type": "main", "index": 0 }]]
+    },
+    "Consolidate_Without_Second_Analysis": {
+      "main": [[{ "node": "Log_Agent_Run", "type": "main", "index": 0 }]]
+    },
+    "Log_Agent_Run": {
+      "main": [[{ "node": "Update_Job_With_Scores", "type": "main", "index": 0 }]]
+    },
+    "Update_Job_With_Scores": {
+      "main": [[{ "node": "Switch_Classification", "type": "main", "index": 0 }]]
+    },
+    "Switch_Classification": {
+      "main": [
+        [{ "node": "Call_WF05_Company_Research", "type": "main", "index": 0 }],
+        [{ "node": "Mark_Manual_Review_Stop", "type": "main", "index": 0 }],
+        [{ "node": "Mark_Rejected_Stop", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,220 @@
+{
+  "name": "WF08_APPLICATION_AGENT",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF08_APPLICATION_AGENT\n\n**Objectif** : préparer les réponses aux questions standards (Claude APPLICATION_AGENT), évaluer STRICTEMENT la règle de candidature (§30), et soumettre uniquement si TOUTES les conditions sont vraies ET que la plateforme est explicitement listée comme automatisable (`AUTOMATABLE_SOURCES_CSV`). Sinon → `BLOCKED_REQUIRES_MANUAL_ACTION`, jamais de contournement CAPTCHA/MFA/anti-bot.\n\nPrompt complet : `/prompts/04-application-agent.md`. Schéma : `/schemas/application_agent.schema.json`.\n\n⚠️ Le node `Submit_Application_Auto` est un GABARIT générique (POST vers `application_url`). Ne l'activer/adapter que pour une intégration ATS confirmée comme autorisée contractuellement (ex. API partenaire officielle). Par défaut, la majorité des offres seront `BLOCKED_REQUIRES_MANUAL_ACTION` — c'est le comportement attendu et sûr.",
+        "height": 380,
+        "width": 480
+      },
+      "id": "sticky_wf08",
+      "name": "Objectif_WF08",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -320]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf08",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "filterByFormula": "={{ 'IS_SAME({application_date}, TODAY(), \\'day\\')' }}",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_daily_application_count",
+      "name": "Get_Daily_Application_Count",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [-40, 220],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst STANDARD_QUESTIONS = [\n  { question: 'Combien d\\'années d\\'expérience avez-vous en cybersécurité ?', mandatory: true, category: 'experience' },\n  { question: 'Avez-vous de l\\'expérience avec Microsoft Sentinel / Defender ?', mandatory: true, category: 'technical' },\n  { question: 'Avez-vous de l\\'expérience avec un SIEM/SOAR ?', mandatory: false, category: 'technical' },\n  { question: 'Avez-vous de l\\'expérience en gestion des vulnérabilités (ex. Tenable) ?', mandatory: false, category: 'technical' },\n  { question: 'Quelle est votre disponibilité pour commencer ?', mandatory: true, category: 'availability' },\n  { question: 'Parlez-vous français et anglais ? Quel est votre niveau d\\'anglais ?', mandatory: true, category: 'language' },\n  { question: 'Êtes-vous légalement autorisé à travailler au Canada ?', mandatory: true, category: 'work_authorization' },\n  { question: 'Acceptez-vous de vous identifier volontairement (genre, handicap, origine ethnique) ? (facultatif)', mandatory: false, category: 'sensitive_excluded' }\n];\n\nconst systemPrompt = `Tu es APPLICATION_AGENT. Réponds uniquement si l'information est SUPPORTED par le profil/CV fourni, sinon UNKNOWN. Pour les questions catégorie sensitive_excluded: si facultative, choisis prefer_not_to_answer (ou left_blank si pas d'option); si obligatoire sans réponse approuvée, REQUIRES_MANUAL_REVIEW. Ne devine jamais. Réponds UNIQUEMENT via l'outil return_application_answers.`;\n\nconst userMessage = JSON.stringify({\n  application_questions: STANDARD_QUESTIONS,\n  candidate_profile: {\n    years_experience_cybersecurity: 'À CONFIRMER dans le profil approuvé',\n    technologies: ['Microsoft Sentinel','Defender XDR','Defender for Endpoint','Azure','Entra ID','KQL','Tenable'],\n    languages: { french: 'native', english: 'professional_intermediate' },\n    availability: 'À CONFIRMER dans le profil approuvé',\n    work_authorization: 'À CONFIRMER dans le profil approuvé'\n  }\n});\n\nreturn [{ json: { ...j, aa_system_prompt: systemPrompt, aa_user_message: userMessage } }];"
+      },
+      "id": "build_application_agent_request",
+      "name": "Build_Application_Agent_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 1500, system: $json.aa_system_prompt, messages: [{ role: 'user', content: $json.aa_user_message }], tools: [{ name: 'return_application_answers', description: 'Retourne les réponses préparées au formulaire de candidature', input_schema: { type: 'object', required: ['job_id','blocked','has_unknown_mandatory_question','answers','model'], properties: { job_id: { type: 'string' }, blocked: { type: 'boolean' }, blocked_reason: { type: ['string','null'] }, has_unknown_mandatory_question: { type: 'boolean' }, answers: { type: 'array' }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_application_answers' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_application_agent",
+      "name": "Call_Claude_Application_Agent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 60],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const answers = toolUse ? toolUse.input : {};\n  const job = $('Build_Application_Agent_Request').first().json;\n  return { json: { ...job, application_agent: { ...answers, model: body.model } } };\n});"
+      },
+      "id": "parse_application_agent_response",
+      "name": "Parse_Application_Agent_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst overallScore = j.final_analysis?.overall_score ?? 0;\nconst atsScore = j.cv_optimization?.optimized_ats_score ?? 0;\nconst noBlockingRequirement = !((j.final_analysis?.blocking_reasons || []).length);\nconst alreadyApplied = j.dedup_status === 'ALREADY_APPLIED';\nconst dailyCount = $('Get_Daily_Application_Count').all().length;\nconst maxPerDay = parseInt($vars.MAX_APPLICATIONS_PER_DAY || '5', 10);\nconst automationAllowed = String($vars.APPLICATION_AUTOMATION_ALLOWED || 'true') === 'true';\nconst noCaptcha = !j.application_agent?.blocked;\nconst noUnknownMandatory = !j.application_agent?.has_unknown_mandatory_question;\n\nconst automatableSources = String($vars.AUTOMATABLE_SOURCES_CSV || '').split(',').map(s => s.trim()).filter(Boolean);\nconst platformAutomatable = automatableSources.includes(j.source) && !!j.easy_apply;\n\nconst conditions = {\n  overall_score_ok: overallScore >= parseInt($vars.MIN_OVERALL_SCORE_TO_APPLY || '70', 10),\n  ats_score_ok: atsScore >= parseInt($vars.MIN_ATS_SCORE_TO_APPLY || '80', 10),\n  no_blocking_requirement: noBlockingRequirement,\n  not_already_applied: !alreadyApplied,\n  under_daily_quota: dailyCount < maxPerDay,\n  automation_allowed: automationAllowed,\n  no_captcha: noCaptcha,\n  no_unknown_mandatory_question: noUnknownMandatory,\n  platform_automatable: platformAutomatable\n};\n\nconst canAutoApply = Object.values(conditions).every(Boolean);\nconst failedConditions = Object.entries(conditions).filter(([k, v]) => !v).map(([k]) => k);\n\nreturn [{ json: { ...j, application_conditions: conditions, can_auto_apply: canAutoApply, failed_conditions: failedConditions, daily_application_count: dailyCount } }];"
+      },
+      "id": "evaluate_application_rule",
+      "name": "Evaluate_Application_Rule",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_can_auto_apply",
+              "leftValue": "={{ $json.can_auto_apply }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_can_auto_apply",
+      "name": "IF_Can_Auto_Apply",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.application_url }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ candidate: 'Aboubacar', cv_url: $json.cv_onedrive_path, cover_letter_url: $json.cl_onedrive_path, answers: $json.application_agent.answers }) }}",
+        "options": {}
+      },
+      "id": "submit_application_auto",
+      "name": "Submit_Application_Auto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1160, -80],
+      "notesInFlow": true,
+      "notes": "GABARIT générique — n'activer que pour une API de candidature officiellement autorisée (jamais un formulaire web protégé par CAPTCHA/anti-bot)."
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nreturn [{ json: { ...j, application_status: 'APPLIED', application_method: 'auto_form', blocking_reason: '' } }];"
+      },
+      "id": "mark_applied",
+      "name": "Mark_Applied",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, -80]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst reason = 'Conditions non satisfaites: ' + (j.failed_conditions || []).join(', ');\nreturn [{ json: { ...j, application_status: 'BLOCKED_REQUIRES_MANUAL_ACTION', application_method: 'manual_required', blocking_reason: reason } }];"
+      },
+      "id": "mark_blocked_manual_action",
+      "name": "Mark_Blocked_Manual_Action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 220]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF09_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF09_APPLICATION_TRACKER"
+        },
+        "options": {}
+      },
+      "id": "call_wf09_application_tracker",
+      "name": "Call_WF09_Application_Tracker",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1640, 60]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [
+        [
+          { "node": "Build_Application_Agent_Request", "type": "main", "index": 0 },
+          { "node": "Get_Daily_Application_Count", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build_Application_Agent_Request": {
+      "main": [[{ "node": "Call_Claude_Application_Agent", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Application_Agent": {
+      "main": [[{ "node": "Parse_Application_Agent_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_Application_Agent_Response": {
+      "main": [[{ "node": "Evaluate_Application_Rule", "type": "main", "index": 0 }]]
+    },
+    "Evaluate_Application_Rule": {
+      "main": [[{ "node": "IF_Can_Auto_Apply", "type": "main", "index": 0 }]]
+    },
+    "IF_Can_Auto_Apply": {
+      "main": [
+        [{ "node": "Submit_Application_Auto", "type": "main", "index": 0 }],
+        [{ "node": "Mark_Blocked_Manual_Action", "type": "main", "index": 0 }]
+      ]
+    },
+    "Submit_Application_Auto": {
+      "main": [[{ "node": "Mark_Applied", "type": "main", "index": 0 }]]
+    },
+    "Mark_Applied": {
+      "main": [[{ "node": "Call_WF09_Application_Tracker", "type": "main", "index": 0 }]]
+    },
+    "Mark_Blocked_Manual_Action": {
+      "main": [[{ "node": "Call_WF09_Application_Tracker", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

@@ -1,0 +1,193 @@
+{
+  "name": "WF05_COMPANY_RESEARCH",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF05_COMPANY_RESEARCH\n\n**Objectif** : rechercher des informations publiques et vérifiées sur l'entreprise pour les offres qualifiées (déjà filtrées à `overall_score >= 70` par WF04). Utilise Claude COMPANY_RESEARCHER. Toute affirmation porte une étiquette SUPPORTED/INFERRED/UNKNOWN — jamais injectée comme fait certain en aval.\n\nPrompt complet : `/prompts/02-company-researcher.md`. Schéma : `/schemas/company_researcher.schema.json`.",
+        "height": 260,
+        "width": 440
+      },
+      "id": "sticky_wf05",
+      "name": "Objectif_WF05",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-240, -200]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf05",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-240, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Récupère du contexte public sur l'entreprise UNIQUEMENT via une source autorisée.\n// Par défaut : pas de scraping — on n'utilise que la description de l'offre + le site officiel\n// de l'entreprise si l'URL est un domaine propre (jamais un moteur de recherche tiers en\n// violation de ses conditions d'utilisation).\n// Si votre organisation dispose d'une API de recherche autorisée (ex. Bing Web Search API avec\n// clé), configurez COMPANY_SEARCH_API_URL / le credential associé et adaptez ce node en HTTP\n// Request vers cette API officielle plutôt que de scraper un moteur de recherche.\nconst job = $json;\nreturn [{ json: { ...job, public_context_excerpt: '' } }];"
+      },
+      "id": "search_public_web_context",
+      "name": "Search_Public_Web_Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "const job = $json;\nconst webContext = job.public_context_excerpt || '';\n\nconst systemPrompt = `Tu es COMPANY_RESEARCHER. Identifie: industrie, taille approximative, technologies mentionnées, posture cybersécurité, environnement cloud, présence Microsoft, projets récents, culture/département. Étiquette CHAQUE champ SUPPORTED (source fournie explicite), INFERRED (déduction raisonnable, jamais un fait) ou UNKNOWN (aucune info fiable - ne devine jamais). Réponds UNIQUEMENT via l'outil return_company_research.`;\nconst userMessage = JSON.stringify({ company_name: job.company, job_title: job.title, job_description: job.description, public_context_excerpt: webContext });\n\nreturn [{ json: { ...job, research_system_prompt: systemPrompt, research_user_message: userMessage } }];"
+      },
+      "id": "build_company_research_request",
+      "name": "Build_Company_Research_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 1500, system: $json.research_system_prompt, messages: [{ role: 'user', content: $json.research_user_message }], tools: [{ name: 'return_company_research', description: 'Retourne la recherche structurée sur l\\'entreprise', input_schema: { type: 'object', required: ['job_id','company_name','fields','model'], properties: { job_id: { type: 'string' }, company_name: { type: 'string' }, fields: { type: 'object' }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_company_research' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_company_researcher",
+      "name": "Call_Claude_Company_Researcher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 40],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const research = toolUse ? toolUse.input : {};\n  const job = $('Build_Company_Research_Request').first().json;\n  return { json: { ...job, company_research: { ...research, model: body.model } } };\n});"
+      },
+      "id": "parse_company_research_response",
+      "name": "Parse_Company_Research_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 40]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Companies", "mode": "list", "cachedResultName": "Companies" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["name"],
+          "value": {
+            "company_id": "={{ $json.company }}",
+            "name": "={{ $json.company }}",
+            "industry": "={{ $json.company_research.fields.industry.value }}",
+            "size_estimate": "={{ $json.company_research.fields.size_estimate.value }}",
+            "technologies_mentioned": "={{ $json.company_research.fields.technologies_mentioned.value }}",
+            "microsoft_environment": "={{ $json.company_research.fields.microsoft_presence.confidence }}",
+            "cloud_environment": "={{ $json.company_research.fields.cloud_environment.value }}",
+            "security_posture_notes": "={{ $json.company_research.fields.cybersecurity_posture.value }}",
+            "recent_projects": "={{ $json.company_research.fields.recent_projects.value }}",
+            "research_confidence": "={{ $json.company_research.fields.cybersecurity_posture.confidence }}",
+            "research_date": "={{ $now.toISO() }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "upsert_company_record",
+      "name": "Upsert_Company_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [960, 40],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agent_name": "COMPANY_RESEARCHER",
+            "model": "={{ $json.company_research.model }}",
+            "job_id": "={{ $json.job_id }}",
+            "score": 0,
+            "decision": "RESEARCH_COMPLETED",
+            "reason": "={{ 'Recherche entreprise complétée pour ' + $json.company }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log_agent_run_wf05",
+      "name": "Log_Agent_Run",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1200, 40],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF06_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF06_CV_OPTIMIZER"
+        },
+        "options": {}
+      },
+      "id": "call_wf06_cv_optimizer",
+      "name": "Call_WF06_CV_Optimizer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1440, 40]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Search_Public_Web_Context", "type": "main", "index": 0 }]]
+    },
+    "Search_Public_Web_Context": {
+      "main": [[{ "node": "Build_Company_Research_Request", "type": "main", "index": 0 }]]
+    },
+    "Build_Company_Research_Request": {
+      "main": [[{ "node": "Call_Claude_Company_Researcher", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Company_Researcher": {
+      "main": [[{ "node": "Parse_Company_Research_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_Company_Research_Response": {
+      "main": [[{ "node": "Upsert_Company_Record", "type": "main", "index": 0 }]]
+    },
+    "Upsert_Company_Record": {
+      "main": [[{ "node": "Log_Agent_Run", "type": "main", "index": 0 }]]
+    },
+    "Log_Agent_Run": {
+      "main": [[{ "node": "Call_WF06_CV_Optimizer", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

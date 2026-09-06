@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmailResponseMonitorOutput",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["classification", "confidence", "extracted", "matched_application_id", "suggested_application_status", "model"],
+  "properties": {
+    "classification": {
+      "type": "string",
+      "enum": [
+        "APPLICATION_CONFIRMATION",
+        "RECRUITER_MESSAGE",
+        "INTERVIEW_REQUEST",
+        "TECHNICAL_TEST",
+        "REJECTION",
+        "JOB_OFFER",
+        "REQUEST_FOR_INFORMATION",
+        "UNKNOWN"
+      ]
+    },
+    "confidence": { "type": "string", "enum": ["SUPPORTED", "INFERRED", "UNKNOWN"] },
+    "extracted": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "company": { "type": ["string", "null"] },
+        "job_title": { "type": ["string", "null"] },
+        "recruiter_name": { "type": ["string", "null"] },
+        "action_required": { "type": ["string", "null"] },
+        "deadline": { "type": ["string", "null"] },
+        "proposed_date": { "type": ["string", "null"] }
+      }
+    },
+    "matched_application_id": { "type": ["string", "null"] },
+    "suggested_application_status": {
+      "type": ["string", "null"],
+      "enum": [
+        "APPLICATION_CONFIRMED",
+        "INTERVIEW",
+        "TECHNICAL_TEST",
+        "REJECTED",
+        "OFFER",
+        "REQUIRES_MANUAL_REVIEW",
+        null
+      ]
+    },
+    "model": { "type": "string" }
+  }
+}
