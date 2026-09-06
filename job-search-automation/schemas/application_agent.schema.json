@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ApplicationAgentOutput",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["job_id", "blocked", "has_unknown_mandatory_question", "answers", "model"],
+  "properties": {
+    "job_id": { "type": "string" },
+    "blocked": { "type": "boolean" },
+    "blocked_reason": { "type": ["string", "null"], "enum": ["captcha_or_mfa_detected", null] },
+    "has_unknown_mandatory_question": { "type": "boolean" },
+    "answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["question", "mandatory", "category", "answer", "confidence"],
+        "properties": {
+          "question": { "type": "string" },
+          "mandatory": { "type": "boolean" },
+          "category": {
+            "type": "string",
+            "enum": [
+              "technical",
+              "experience",
+              "availability",
+              "language",
+              "work_authorization",
+              "sensitive_excluded",
+              "other"
+            ]
+          },
+          "answer": {
+            "type": "string",
+            "description": "Valeur de réponse, ou UNKNOWN / prefer_not_to_answer / left_blank / REQUIRES_MANUAL_REVIEW"
+          },
+          "confidence": { "type": "string", "enum": ["SUPPORTED", "UNKNOWN"] }
+        }
+      }
+    },
+    "model": { "type": "string" }
+  }
+}

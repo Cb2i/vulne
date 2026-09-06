@@ -1,0 +1,226 @@
+{
+  "name": "WF11_DAILY_REPORT",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF11_DAILY_REPORT\n\n**Objectif** : agréger les métriques du jour (Airtable) et envoyer le rapport quotidien par courriel (§39/§40). Déclenché une fois par jour à `DAILY_REPORT_SEND_TIME` (America/Toronto).\n\nToutes les requêtes Airtable ci-dessous utilisent `IS_SAME(champ_date, TODAY(), 'day')` — ajuster si votre instance Airtable requiert un autre format de formule.",
+        "height": 240,
+        "width": 460
+      },
+      "id": "sticky_wf11",
+      "name": "Objectif_WF11",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -220]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 22 * * *" }] }
+      },
+      "id": "schedule_trigger_daily_report",
+      "name": "Schedule_Trigger_Daily_22h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "filterByFormula": "AND({agent_name}='DEDUPLICATION', IS_SAME({timestamp}, TODAY(), 'day'))",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_dedup_events_today",
+      "name": "Get_Dedup_Events_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, -220],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "filterByFormula": "AND({agent_name}='JOB_ANALYZER', IS_SAME({timestamp}, TODAY(), 'day'))",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_analyzer_runs_today",
+      "name": "Get_Analyzer_Runs_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, -60],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "CVVersions", "mode": "list", "cachedResultName": "CVVersions" },
+        "filterByFormula": "IS_SAME({created_at}, TODAY(), 'day')",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_cv_versions_today",
+      "name": "Get_CV_Versions_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, 100],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "filterByFormula": "IS_SAME({application_date}, TODAY(), 'day')",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_applications_sent_today",
+      "name": "Get_Applications_Sent_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, 260],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "filterByFormula": "IS_SAME({last_update}, TODAY(), 'day')",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_status_changes_today",
+      "name": "Get_Status_Changes_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, 420],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Jobs", "mode": "list", "cachedResultName": "Jobs" },
+        "filterByFormula": "AND(OR({classification}='PRIORITY',{classification}='APPLY'), IS_SAME({updated_at}, TODAY(), 'day'))",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_top_jobs_today",
+      "name": "Get_Top_Jobs_Today",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, 580],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const dedup = $('Get_Dedup_Events_Today').all().map(i => i.json.fields);\nconst analyzer = $('Get_Analyzer_Runs_Today').all().map(i => i.json.fields);\nconst cvVersions = $('Get_CV_Versions_Today').all();\nconst applicationsSent = $('Get_Applications_Sent_Today').all().map(i => i.json.fields);\nconst statusChanges = $('Get_Status_Changes_Today').all().map(i => i.json.fields);\nconst topJobs = $('Get_Top_Jobs_Today').all().map(i => i.json.fields);\n\nconst count = (arr, pred) => arr.filter(pred).length;\n\nconst metrics = {\n  jobs_found: dedup.length,\n  jobs_new: count(dedup, d => d.decision === 'NEW' || d.decision === 'UPDATED_JOB'),\n  jobs_duplicate: count(dedup, d => d.decision === 'DUPLICATE' || d.decision === 'ALREADY_APPLIED'),\n  jobs_analyzed: analyzer.length,\n  jobs_score_80plus: count(analyzer, a => (a.score || 0) >= 80),\n  jobs_score_70_79: count(analyzer, a => (a.score || 0) >= 70 && (a.score || 0) < 80),\n  jobs_score_60_69: count(analyzer, a => (a.score || 0) >= 60 && (a.score || 0) < 70),\n  jobs_rejected: count(analyzer, a => a.decision === 'REJECT'),\n  cvs_generated: cvVersions.length,\n  applications_sent: count(applicationsSent, a => a.status === 'APPLIED' || a.status === 'APPLICATION_CONFIRMED'),\n  applications_blocked: count(applicationsSent, a => a.status === 'BLOCKED_REQUIRES_MANUAL_ACTION'),\n  responses_received: count(statusChanges, a => a.response_type && a.response_type !== 'none'),\n  interviews: count(statusChanges, a => a.status === 'INTERVIEW'),\n  rejections: count(statusChanges, a => a.status === 'REJECTED'),\n  technical_tests: count(statusChanges, a => a.status === 'TECHNICAL_TEST'),\n  avg_score: analyzer.length ? Math.round(analyzer.reduce((s, a) => s + (a.score || 0), 0) / analyzer.length) : 0,\n  top_jobs: topJobs\n};\n\nreturn [{ json: { report_date: new Date().toISOString().slice(0, 10), ...metrics } }];"
+      },
+      "id": "compute_daily_metrics",
+      "name": "Compute_Daily_Metrics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [280, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "const m = $json;\nconst esc = (v) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst rows = (m.top_jobs || []).map(j => `<tr><td>${esc(j.company)}</td><td>${esc(j.title)}</td><td>${esc(j.location)}</td><td>${esc(j.work_mode)}</td><td>${j.salary_min || ''}-${j.salary_max || ''} ${esc(j.salary_currency)}</td><td>${j.overall_score}</td><td>${j.ats_score || ''}</td><td>${esc(j.interview_probability_label || '')}</td><td>${esc(j.classification)}</td><td><a href=\"${esc(j.url)}\">Lien</a></td></tr>`).join('');\n\nconst html = `<h1>JOB SEARCH REPORT - ${m.report_date}</h1>\n<ul>\n<li>OFFRES TROUVÉES: ${m.jobs_found}</li>\n<li>OFFRES NOUVELLES: ${m.jobs_new}</li>\n<li>DOUBLONS: ${m.jobs_duplicate}</li>\n<li>OFFRES ANALYSÉES: ${m.jobs_analyzed}</li>\n<li>OFFRES >=80: ${m.jobs_score_80plus}</li>\n<li>OFFRES 70-79: ${m.jobs_score_70_79}</li>\n<li>OFFRES 60-69: ${m.jobs_score_60_69}</li>\n<li>OFFRES REJETÉES: ${m.jobs_rejected}</li>\n<li>CV GÉNÉRÉS: ${m.cvs_generated}</li>\n<li>CANDIDATURES ENVOYÉES: ${m.applications_sent}</li>\n<li>CANDIDATURES BLOQUÉES: ${m.applications_blocked}</li>\n<li>RÉPONSES REÇUES: ${m.responses_received}</li>\n<li>ENTRETIENS: ${m.interviews}</li>\n<li>REFUS: ${m.rejections}</li>\n<li>TESTS TECHNIQUES: ${m.technical_tests}</li>\n<li>SCORE MOYEN: ${m.avg_score}</li>\n</ul>\n<table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">\n<tr><th>Entreprise</th><th>Poste</th><th>Localisation</th><th>Remote/Hybrid</th><th>Salaire</th><th>Score</th><th>ATS</th><th>Chance entretien</th><th>Statut</th><th>URL</th></tr>\n${rows}\n</table>`;\n\nreturn [{ json: { ...m, report_html: html } }];"
+      },
+      "id": "render_report_html",
+      "name": "Render_Report_HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [520, 180]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "DailyReports", "mode": "list", "cachedResultName": "DailyReports" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["report_date"],
+          "value": {
+            "report_date": "={{ $json.report_date }}",
+            "jobs_found": "={{ $json.jobs_found }}",
+            "jobs_new": "={{ $json.jobs_new }}",
+            "jobs_duplicate": "={{ $json.jobs_duplicate }}",
+            "jobs_analyzed": "={{ $json.jobs_analyzed }}",
+            "jobs_score_80plus": "={{ $json.jobs_score_80plus }}",
+            "jobs_score_70_79": "={{ $json.jobs_score_70_79 }}",
+            "jobs_score_60_69": "={{ $json.jobs_score_60_69 }}",
+            "jobs_rejected": "={{ $json.jobs_rejected }}",
+            "cvs_generated": "={{ $json.cvs_generated }}",
+            "applications_sent": "={{ $json.applications_sent }}",
+            "applications_blocked": "={{ $json.applications_blocked }}",
+            "responses_received": "={{ $json.responses_received }}",
+            "interviews": "={{ $json.interviews }}",
+            "rejections": "={{ $json.rejections }}",
+            "technical_tests": "={{ $json.technical_tests }}",
+            "avg_score": "={{ $json.avg_score }}",
+            "report_html": "={{ $json.report_html }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "create_daily_report_record",
+      "name": "Create_Daily_Report_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [760, 180],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ 'JOB SEARCH REPORT - ' + $json.report_date }}",
+        "bodyContent": "={{ $json.report_html }}",
+        "bodyContentType": "html",
+        "toRecipients": "={{ $vars.NOTIFICATION_RECIPIENT }}",
+        "options": {}
+      },
+      "id": "send_daily_report_email",
+      "name": "Send_Daily_Report_Email",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1000, 180],
+      "credentials": { "microsoftOutlookOAuth2Api": { "id": "REPLACE_WITH_OUTLOOK_CREDENTIAL", "name": "Microsoft Outlook OAuth2" } }
+    }
+  ],
+  "connections": {
+    "Schedule_Trigger_Daily_22h": {
+      "main": [
+        [
+          { "node": "Get_Dedup_Events_Today", "type": "main", "index": 0 },
+          { "node": "Get_Analyzer_Runs_Today", "type": "main", "index": 0 },
+          { "node": "Get_CV_Versions_Today", "type": "main", "index": 0 },
+          { "node": "Get_Applications_Sent_Today", "type": "main", "index": 0 },
+          { "node": "Get_Status_Changes_Today", "type": "main", "index": 0 },
+          { "node": "Get_Top_Jobs_Today", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get_Dedup_Events_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Get_Analyzer_Runs_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Get_CV_Versions_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Get_Applications_Sent_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Get_Status_Changes_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Get_Top_Jobs_Today": { "main": [[{ "node": "Compute_Daily_Metrics", "type": "main", "index": 0 }]] },
+    "Compute_Daily_Metrics": { "main": [[{ "node": "Render_Report_HTML", "type": "main", "index": 0 }]] },
+    "Render_Report_HTML": { "main": [[{ "node": "Create_Daily_Report_Record", "type": "main", "index": 0 }]] },
+    "Create_Daily_Report_Record": { "main": [[{ "node": "Send_Daily_Report_Email", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

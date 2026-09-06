@@ -1,0 +1,152 @@
+{
+  "name": "WF12_ERROR_HANDLER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF12_ERROR_HANDLER\n\n**Objectif** : point de collecte central des erreurs (§43). Ce workflow doit être configuré comme **Error Workflow** (Settings → Error Workflow) sur CHACUN des workflows WF01-WF11.\n\nJournalise chaque erreur dans Airtable `Errors`, et envoie une alerte courriel si le nombre d'erreurs du jour dépasse `ERROR_NOTIFICATION_THRESHOLD`.\n\nRappel (§43) : timeout API → 3 essais (déjà géré par `retryOnFail` sur les nodes HTTP concernés) ; 429 → backoff exponentiel ; Claude indisponible → fallback OpenAI (WF10) ; Airtable indisponible → cet enregistrement échouera aussi, d'où l'intérêt de surveiller `Errors` depuis l'extérieur si Airtable est en panne prolongée ; une candidature incertaine ne doit JAMAIS être marquée APPLIED sans confirmation.",
+        "height": 320,
+        "width": 480
+      },
+      "id": "sticky_wf12",
+      "name": "Objectif_WF12",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -260]
+    },
+    {
+      "parameters": {},
+      "id": "error_trigger_wf12",
+      "name": "Error_Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [-280, 40]
+    },
+    {
+      "parameters": {
+        "jsCode": "const e = $json;\nconst execution = e.execution || {};\nconst workflowInfo = e.workflow || {};\nconst error = execution.error || {};\n\nreturn [{ json: {\n  workflow: workflowInfo.name || 'unknown',\n  node: execution.lastNodeExecuted || 'unknown',\n  timestamp: new Date().toISOString(),\n  input_id: (error.context && error.context.itemIndex !== undefined) ? String(error.context.itemIndex) : '',\n  error_code: error.name || error.httpCode || 'ERROR',\n  error_message: (error.message || JSON.stringify(error)).slice(0, 2000),\n  retry_count: execution.retryOf ? 1 : 0,\n  execution_url: execution.url || ''\n} }];"
+      },
+      "id": "extract_error_details",
+      "name": "Extract_Error_Details",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 40]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Errors", "mode": "list", "cachedResultName": "Errors" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "error_id": "={{ $json.workflow + '-' + Date.now() }}",
+            "workflow": "={{ $json.workflow }}",
+            "node": "={{ $json.node }}",
+            "input_id": "={{ $json.input_id }}",
+            "error_code": "={{ $json.error_code }}",
+            "error_message": "={{ $json.error_message }}",
+            "retry_count": "={{ $json.retry_count }}",
+            "resolved": false
+          }
+        },
+        "options": {}
+      },
+      "id": "log_error_to_airtable",
+      "name": "Log_Error_To_Airtable",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [200, 40],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Errors", "mode": "list", "cachedResultName": "Errors" },
+        "filterByFormula": "IS_SAME({timestamp}, TODAY(), 'day')",
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_recent_error_count",
+      "name": "Get_Recent_Error_Count",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [440, 40],
+      "credentials": { "airtableTokenApi": { "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL", "name": "Airtable Job Search PAT" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "const count = $input.all().length;\nconst threshold = parseInt($vars.ERROR_NOTIFICATION_THRESHOLD || '5', 10);\nconst latest = $('Extract_Error_Details').first().json;\nreturn [{ json: { ...latest, error_count_today: count, threshold, should_alert: count >= threshold } }];"
+      },
+      "id": "evaluate_error_threshold",
+      "name": "Evaluate_Error_Threshold",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 40]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_should_alert",
+              "leftValue": "={{ $json.should_alert }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_should_alert",
+      "name": "IF_Should_Alert",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [920, 40]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ '⚠️ Alerte système - Pipeline recherche d\\'emploi (' + $json.error_count_today + ' erreurs aujourd\\'hui)' }}",
+        "bodyContent": "={{ '<p>Le workflow <b>' + $json.workflow + '</b> a échoué au node <b>' + $json.node + '</b>.</p><p>Erreur: ' + $json.error_message + '</p><p>Nombre d\\'erreurs aujourd\\'hui: ' + $json.error_count_today + ' (seuil: ' + $json.threshold + ')</p><p><a href=\"' + $json.execution_url + '\">Voir l\\'exécution</a></p>' }}",
+        "bodyContentType": "html",
+        "toRecipients": "={{ $vars.NOTIFICATION_RECIPIENT }}",
+        "options": {}
+      },
+      "id": "send_critical_error_alert",
+      "name": "Send_Critical_Error_Alert",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [1160, -80],
+      "credentials": { "microsoftOutlookOAuth2Api": { "id": "REPLACE_WITH_OUTLOOK_CREDENTIAL", "name": "Microsoft Outlook OAuth2" } }
+    },
+    {
+      "parameters": {},
+      "id": "no_alert_needed",
+      "name": "No_Alert_Needed",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1160, 160]
+    }
+  ],
+  "connections": {
+    "Error_Trigger": { "main": [[{ "node": "Extract_Error_Details", "type": "main", "index": 0 }]] },
+    "Extract_Error_Details": { "main": [[{ "node": "Log_Error_To_Airtable", "type": "main", "index": 0 }]] },
+    "Log_Error_To_Airtable": { "main": [[{ "node": "Get_Recent_Error_Count", "type": "main", "index": 0 }]] },
+    "Get_Recent_Error_Count": { "main": [[{ "node": "Evaluate_Error_Threshold", "type": "main", "index": 0 }]] },
+    "Evaluate_Error_Threshold": { "main": [[{ "node": "IF_Should_Alert", "type": "main", "index": 0 }]] },
+    "IF_Should_Alert": {
+      "main": [
+        [{ "node": "Send_Critical_Error_Alert", "type": "main", "index": 0 }],
+        [{ "node": "No_Alert_Needed", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

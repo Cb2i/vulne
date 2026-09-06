@@ -1,0 +1,299 @@
+{
+  "name": "WF01_JOB_DISCOVERY",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF01_JOB_DISCOVERY\n\n**Objectif** : découvrir des offres d'emploi en cybersécurité depuis des sources autorisées uniquement (API officielle, RSS, alertes courriel, ATS publics). Ne jamais scraper une plateforme qui l'interdit. Jamais de contournement CAPTCHA/anti-bot/MFA.\n\n**Sortie** : items bruts tagués `_source`, transmis à WF02_JOB_NORMALIZER.\n\nRégler le fuseau horaire de l'instance n8n sur `America/Toronto` (variable d'environnement GENERIC_TIMEZONE) pour que le Schedule Trigger déclenche à 00:00 / 08:00 / 16:00 locaux.",
+        "height": 320,
+        "width": 420
+      },
+      "id": "sticky_wf01",
+      "name": "Objectif_WF01",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-200, -260]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "cronExpression", "expression": "0 0,8,16 * * *" }
+          ]
+        }
+      },
+      "id": "schedule_trigger_8h",
+      "name": "Schedule_Trigger_8h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "const titlesFr = [\n  \"Analyste en cybersécurité\",\"Analyste SOC\",\"Analyste de sécurité\",\"Analyste en sécurité de l'information\",\n  \"Analyste de sécurité cloud\",\"Analyste de sécurité Microsoft\",\"Analyste SIEM\",\"Analyste SIEM/SOAR\",\n  \"Analyste de détection des menaces\",\"Chasseur de menaces\",\"Analyste en gestion des vulnérabilités\",\n  \"Analyste de vulnérabilité\",\"Analyste de réponse aux incidents\",\"Analyste des opérations de sécurité\",\n  \"Spécialiste en cybersécurité\",\"Ingénieur en sécurité\",\"Ingénieur en sécurité cloud\",\n  \"Architecte en cybersécurité\",\"Architecte de sécurité\",\"Ingénieur en sécurité Microsoft\"\n];\n\nconst titlesEn = [\n  \"Cybersecurity Analyst\",\"Cyber Security Analyst\",\"SOC Analyst\",\"Security Analyst\",\n  \"Information Security Analyst\",\"Cloud Security Analyst\",\"Microsoft Security Analyst\",\"SIEM Analyst\",\n  \"SIEM/SOAR Analyst\",\"Threat Detection Analyst\",\"Threat Hunter\",\"Vulnerability Management Analyst\",\n  \"Vulnerability Analyst\",\"Incident Response Analyst\",\"Security Operations Analyst\",\n  \"Cybersecurity Specialist\",\"Security Engineer\",\"Cloud Security Engineer\",\"Cybersecurity Architect\",\n  \"Security Architect\",\"Microsoft Security Engineer\",\"Detection Engineer\",\"Cyber Defense Analyst\",\n  \"Cyber Defense Specialist\",\"Blue Team Analyst\",\"Security Monitoring Analyst\",\n  \"Microsoft 365 Security Engineer\",\"Azure Security Engineer\",\"Security Operations Engineer\",\n  \"Cybersecurity Consultant\",\"Cybersecurity Advisor\",\"Information Security Specialist\",\n  \"Cloud Security Specialist\",\"Microsoft Security Consultant\"\n];\n\nconst all = [...titlesFr.map(t => ({ title: t, lang: 'fr' })), ...titlesEn.map(t => ({ title: t, lang: 'en' }))];\nreturn all.map(t => ({ json: t }));"
+      },
+      "id": "build_job_titles_list",
+      "name": "Build_Job_Titles_List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, -160]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://www.jobbank.gc.ca/rss/jobsearch/jobsearch.xml?searchstring=' + encodeURIComponent($json.title) + '&locationstring=' + encodeURIComponent($vars.HOME_PROVINCE || 'Quebec') }}",
+        "options": {}
+      },
+      "id": "search_job_bank_canada",
+      "name": "Search_Job_Bank_Canada",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [280, -260]
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "_source", "type": "string", "value": "GuichetEmploisCanada" }
+          ]
+        }
+      },
+      "id": "tag_source_jobbank",
+      "name": "Tag_Source_JobBank",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [520, -260]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://www.jobillico.com/recherche-emploi/rss?q=' + encodeURIComponent($json.title) }}",
+        "options": {}
+      },
+      "id": "search_jobillico_rss",
+      "name": "Search_Jobillico_RSS",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.1,
+      "position": [280, -60]
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "_source", "type": "string", "value": "Jobillico" }
+          ]
+        }
+      },
+      "id": "tag_source_jobillico",
+      "name": "Tag_Source_Jobillico",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [520, -60]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "folderId": "={{ $vars.OUTLOOK_JOB_ALERTS_FOLDER || 'JobAlerts' }}",
+        "returnAll": false,
+        "limit": 100,
+        "filters": {}
+      },
+      "id": "read_email_job_alerts",
+      "name": "Read_Email_Job_Alerts",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [40, 140],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_WITH_OUTLOOK_CREDENTIAL",
+          "name": "Microsoft Outlook OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "_source", "type": "string", "value": "EmailAlerts_LinkedIn_Glassdoor" }
+          ]
+        }
+      },
+      "id": "tag_source_email_alerts",
+      "name": "Tag_Source_EmailAlerts",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, 140]
+    },
+    {
+      "parameters": {
+        "jsCode": "const slugsCsv = $vars.GREENHOUSE_SLUGS_CSV || '';\nconst slugs = slugsCsv.split(',').map(s => s.trim()).filter(Boolean);\nreturn slugs.map(slug => ({ json: { slug, ats: 'greenhouse' } }));"
+      },
+      "id": "build_greenhouse_board_queries",
+      "name": "Build_Greenhouse_Board_Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, 340]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://boards-api.greenhouse.io/v1/boards/' + $json.slug + '/jobs?content=true' }}",
+        "options": {}
+      },
+      "id": "query_greenhouse_boards",
+      "name": "Query_Greenhouse_Boards",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 340]
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "_source", "type": "string", "value": "GreenhouseATS" }
+          ]
+        }
+      },
+      "id": "tag_source_greenhouse",
+      "name": "Tag_Source_Greenhouse",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [520, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const slugsCsv = $vars.LEVER_SLUGS_CSV || '';\nconst slugs = slugsCsv.split(',').map(s => s.trim()).filter(Boolean);\nreturn slugs.map(slug => ({ json: { slug, ats: 'lever' } }));"
+      },
+      "id": "build_lever_board_queries",
+      "name": "Build_Lever_Board_Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, 540]
+    },
+    {
+      "parameters": {
+        "url": "={{ 'https://api.lever.co/v0/postings/' + $json.slug + '?mode=json' }}",
+        "options": {}
+      },
+      "id": "query_lever_boards",
+      "name": "Query_Lever_Boards",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [280, 540]
+    },
+    {
+      "parameters": {
+        "includeOtherFields": true,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "_source", "type": "string", "value": "LeverATS" }
+          ]
+        }
+      },
+      "id": "tag_source_lever",
+      "name": "Tag_Source_Lever",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [520, 540]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "numberInputs": 5
+      },
+      "id": "merge_all_sources",
+      "name": "Merge_All_Sources",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [760, 140]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF02_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF02_JOB_NORMALIZER"
+        },
+        "options": {}
+      },
+      "id": "call_wf02_job_normalizer",
+      "name": "Call_WF02_Job_Normalizer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1000, 140]
+    }
+  ],
+  "connections": {
+    "Schedule_Trigger_8h": {
+      "main": [
+        [
+          { "node": "Build_Job_Titles_List", "type": "main", "index": 0 },
+          { "node": "Read_Email_Job_Alerts", "type": "main", "index": 0 },
+          { "node": "Build_Greenhouse_Board_Queries", "type": "main", "index": 0 },
+          { "node": "Build_Lever_Board_Queries", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Build_Job_Titles_List": {
+      "main": [
+        [
+          { "node": "Search_Job_Bank_Canada", "type": "main", "index": 0 },
+          { "node": "Search_Jobillico_RSS", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Search_Job_Bank_Canada": {
+      "main": [[{ "node": "Tag_Source_JobBank", "type": "main", "index": 0 }]]
+    },
+    "Tag_Source_JobBank": {
+      "main": [[{ "node": "Merge_All_Sources", "type": "main", "index": 0 }]]
+    },
+    "Search_Jobillico_RSS": {
+      "main": [[{ "node": "Tag_Source_Jobillico", "type": "main", "index": 0 }]]
+    },
+    "Tag_Source_Jobillico": {
+      "main": [[{ "node": "Merge_All_Sources", "type": "main", "index": 1 }]]
+    },
+    "Read_Email_Job_Alerts": {
+      "main": [[{ "node": "Tag_Source_EmailAlerts", "type": "main", "index": 0 }]]
+    },
+    "Tag_Source_EmailAlerts": {
+      "main": [[{ "node": "Merge_All_Sources", "type": "main", "index": 2 }]]
+    },
+    "Build_Greenhouse_Board_Queries": {
+      "main": [[{ "node": "Query_Greenhouse_Boards", "type": "main", "index": 0 }]]
+    },
+    "Query_Greenhouse_Boards": {
+      "main": [[{ "node": "Tag_Source_Greenhouse", "type": "main", "index": 0 }]]
+    },
+    "Tag_Source_Greenhouse": {
+      "main": [[{ "node": "Merge_All_Sources", "type": "main", "index": 3 }]]
+    },
+    "Build_Lever_Board_Queries": {
+      "main": [[{ "node": "Query_Lever_Boards", "type": "main", "index": 0 }]]
+    },
+    "Query_Lever_Boards": {
+      "main": [[{ "node": "Tag_Source_Lever", "type": "main", "index": 0 }]]
+    },
+    "Tag_Source_Lever": {
+      "main": [[{ "node": "Merge_All_Sources", "type": "main", "index": 4 }]]
+    },
+    "Merge_All_Sources": {
+      "main": [[{ "node": "Call_WF02_Job_Normalizer", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

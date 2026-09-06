@@ -1,0 +1,311 @@
+{
+  "name": "WF03_DEDUPLICATION",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF03_DEDUPLICATION\n\n**Objectif** : calculer un fingerprint SHA256 (entreprise+titre+localisation+URL de candidature normalisés), le comparer à Airtable `Jobs`, et déterminer NEW / DUPLICATE / ALREADY_APPLIED / UPDATED_JOB (§16).\n\n**Sortie** : NEW/UPDATED_JOB → WF04_AI_JOB_ANALYZER. DUPLICATE/ALREADY_APPLIED → arrêt journalisé, aucune re-candidature.\n\n⚠️ Les noms de paramètres du node Merge/Airtable peuvent varier légèrement selon la version n8n installée — vérifier après import.",
+        "height": 300,
+        "width": 420
+      },
+      "id": "sticky_wf03",
+      "name": "Objectif_WF03",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-240, -240]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf03",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-240, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "function normalize(v) {\n  return String(v || '')\n    .toLowerCase()\n    .normalize('NFD').replace(/[\\u0300-\\u036f]/g, '')\n    .replace(/[^a-z0-9]+/g, ' ')\n    .trim();\n}\n\nreturn $input.all().map(item => {\n  const j = item.json;\n  const normalized_company = normalize(j.company);\n  const normalized_title = normalize(j.title);\n  const normalized_location = normalize(j.location);\n  const normalized_application_url = normalize(j.application_url || j.url);\n  const fingerprint_source = normalized_company + '|' + normalized_title + '|' + normalized_location + '|' + normalized_application_url;\n  return { json: { ...j, normalized_company, normalized_title, normalized_location, normalized_application_url, fingerprint_source } };\n});"
+      },
+      "id": "build_normalized_fingerprint_input",
+      "name": "Build_Normalized_Fingerprint_Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [0, 60]
+    },
+    {
+      "parameters": {
+        "type": "SHA256",
+        "value": "={{ $json.fingerprint_source }}",
+        "dataPropertyName": "fingerprint",
+        "encoding": "hex"
+      },
+      "id": "compute_fingerprint_sha256",
+      "name": "Compute_Fingerprint_SHA256",
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [240, 60]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Jobs", "mode": "list", "cachedResultName": "Jobs" },
+        "filterByFormula": "={{ '{fingerprint} = \"' + $json.fingerprint + '\"' }}",
+        "options": {}
+      },
+      "id": "search_jobs_by_fingerprint",
+      "name": "Search_Jobs_By_Fingerprint",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [480, 180],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "includeOtherFields": false,
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            { "id": "1", "name": "fingerprint", "type": "string", "value": "={{ $json.fields.fingerprint }}" },
+            { "id": "2", "name": "existing_record_id", "type": "string", "value": "={{ $json.id }}" },
+            { "id": "3", "name": "existing_status", "type": "string", "value": "={{ $json.fields.status }}" },
+            { "id": "4", "name": "existing_date_posted", "type": "string", "value": "={{ $json.fields.date_posted }}" },
+            { "id": "5", "name": "existing_description", "type": "string", "value": "={{ $json.fields.description }}" }
+          ]
+        }
+      },
+      "id": "rename_existing_fields",
+      "name": "Rename_Existing_Fields",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [720, 180]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByFields",
+        "fieldsToMatchString": "fingerprint",
+        "joinMode": "keepEverything",
+        "options": {}
+      },
+      "id": "merge_fingerprint_lookup",
+      "name": "Merge_Fingerprint_Lookup",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [960, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const j = item.json;\n  const hasMatch = !!j.existing_record_id;\n  let status;\n  if (!hasMatch) {\n    status = 'NEW';\n  } else if (['ALREADY_APPLIED','APPLIED','APPLICATION_CONFIRMED','INTERVIEW','TECHNICAL_TEST','OFFER'].includes(j.existing_status)) {\n    status = 'ALREADY_APPLIED';\n  } else if (j.existing_description && j.description && j.existing_description !== j.description) {\n    status = 'UPDATED_JOB';\n  } else {\n    status = 'DUPLICATE';\n  }\n  return { json: { ...j, dedup_status: status } };\n});"
+      },
+      "id": "determine_dedup_status",
+      "name": "Determine_Dedup_Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 60]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.dedup_status }}", "rightValue": "NEW", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "NEW" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.dedup_status }}", "rightValue": "UPDATED_JOB", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "UPDATED_JOB" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.dedup_status }}", "rightValue": "DUPLICATE", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "DUPLICATE" },
+            { "conditions": { "conditions": [{ "leftValue": "={{ $json.dedup_status }}", "rightValue": "ALREADY_APPLIED", "operator": { "type": "string", "operation": "equals" } }], "combinator": "and" }, "outputKey": "ALREADY_APPLIED" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "switch_dedup_status",
+      "name": "Switch_Dedup_Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1440, 60]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agent_name": "DEDUPLICATION",
+            "job_id": "={{ $json.job_id }}",
+            "decision": "={{ $json.dedup_status }}",
+            "reason": "={{ 'Fingerprint ' + $json.fingerprint + ' -> ' + $json.dedup_status }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log_dedup_event",
+      "name": "Log_Dedup_Event",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1220, 260],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Jobs", "mode": "list", "cachedResultName": "Jobs" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "job_id": "={{ $json.job_id }}",
+            "fingerprint": "={{ $json.fingerprint }}",
+            "source": "={{ $json.source }}",
+            "source_job_id": "={{ $json.source_job_id }}",
+            "company": "={{ $json.company }}",
+            "title": "={{ $json.title }}",
+            "url": "={{ $json.url }}",
+            "application_url": "={{ $json.application_url }}",
+            "location": "={{ $json.location }}",
+            "work_mode": "={{ $json.work_mode }}",
+            "employment_type": "={{ $json.employment_type }}",
+            "description": "={{ $json.description }}",
+            "date_posted": "={{ $json.date_posted }}",
+            "date_discovered": "={{ $json.date_discovered }}",
+            "status": "NEW"
+          }
+        },
+        "options": {}
+      },
+      "id": "create_job_record",
+      "name": "Create_Job_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1680, -100],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Jobs", "mode": "list", "cachedResultName": "Jobs" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["id"],
+          "value": {
+            "id": "={{ $json.existing_record_id }}",
+            "description": "={{ $json.description }}",
+            "date_posted": "={{ $json.date_posted }}",
+            "status": "UPDATED_JOB"
+          }
+        },
+        "options": {}
+      },
+      "id": "update_job_record",
+      "name": "Update_Job_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1680, 60],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "log_duplicate_stop",
+      "name": "Log_Duplicate_Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1680, 220]
+    },
+    {
+      "parameters": {},
+      "id": "log_already_applied_stop",
+      "name": "Log_Already_Applied_Stop",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1680, 380]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF04_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF04_AI_JOB_ANALYZER"
+        },
+        "options": {}
+      },
+      "id": "call_wf04_job_analyzer",
+      "name": "Call_WF04_Job_Analyzer",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1920, -20]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Build_Normalized_Fingerprint_Input", "type": "main", "index": 0 }]]
+    },
+    "Build_Normalized_Fingerprint_Input": {
+      "main": [[{ "node": "Compute_Fingerprint_SHA256", "type": "main", "index": 0 }]]
+    },
+    "Compute_Fingerprint_SHA256": {
+      "main": [
+        [
+          { "node": "Merge_Fingerprint_Lookup", "type": "main", "index": 0 },
+          { "node": "Search_Jobs_By_Fingerprint", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Search_Jobs_By_Fingerprint": {
+      "main": [[{ "node": "Rename_Existing_Fields", "type": "main", "index": 0 }]]
+    },
+    "Rename_Existing_Fields": {
+      "main": [[{ "node": "Merge_Fingerprint_Lookup", "type": "main", "index": 1 }]]
+    },
+    "Merge_Fingerprint_Lookup": {
+      "main": [[{ "node": "Determine_Dedup_Status", "type": "main", "index": 0 }]]
+    },
+    "Determine_Dedup_Status": {
+      "main": [
+        [
+          { "node": "Switch_Dedup_Status", "type": "main", "index": 0 },
+          { "node": "Log_Dedup_Event", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Switch_Dedup_Status": {
+      "main": [
+        [{ "node": "Create_Job_Record", "type": "main", "index": 0 }],
+        [{ "node": "Update_Job_Record", "type": "main", "index": 0 }],
+        [{ "node": "Log_Duplicate_Stop", "type": "main", "index": 0 }],
+        [{ "node": "Log_Already_Applied_Stop", "type": "main", "index": 0 }]
+      ]
+    },
+    "Create_Job_Record": {
+      "main": [[{ "node": "Call_WF04_Job_Analyzer", "type": "main", "index": 0 }]]
+    },
+    "Update_Job_Record": {
+      "main": [[{ "node": "Call_WF04_Job_Analyzer", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

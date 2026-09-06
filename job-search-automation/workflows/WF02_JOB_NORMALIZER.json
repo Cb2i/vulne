@@ -1,0 +1,90 @@
+{
+  "name": "WF02_JOB_NORMALIZER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF02_JOB_NORMALIZER\n\n**Objectif** : transformer chaque item brut (quel que soit `_source`) dans le schéma JSON commun (§15 du cahier des charges). Génère `job_id` (UUID) et `date_discovered`.\n\n**Entrée** : items bruts tagués `_source` (depuis WF01).\n**Sortie** : items au format `NormalizedJob`, transmis à WF03_DEDUPLICATION.",
+        "height": 260,
+        "width": 380
+      },
+      "id": "sticky_wf02",
+      "name": "Objectif_WF02",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-200, -160]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf02",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-200, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalise chaque item brut, quelle que soit sa source, vers le schéma JSON commun (§15).\nfunction cleanText(v) {\n  if (!v) return '';\n  return String(v).replace(/<[^>]*>/g, ' ').replace(/\\s+/g, ' ').trim();\n}\n\nfunction guessWorkMode(text) {\n  const t = (text || '').toLowerCase();\n  if (t.includes('télétravail') || t.includes('remote') || t.includes('à distance')) return 'remote';\n  if (t.includes('hybride') || t.includes('hybrid')) return 'hybrid';\n  return 'onsite';\n}\n\nfunction guessEmploymentType(text) {\n  const t = (text || '').toLowerCase();\n  if (t.includes('stage') || t.includes('internship')) return 'internship';\n  if (t.includes('temps partiel') || t.includes('part time') || t.includes('part-time')) return 'part_time_evening';\n  if (t.includes('contrat') || t.includes('contract')) return 'contract';\n  return 'full_time';\n}\n\nconst TECH_KEYWORDS = [\n  'Microsoft Sentinel','Sentinel','Defender XDR','Defender for Endpoint','Defender for Cloud',\n  'Defender Vulnerability Management','Entra ID','Microsoft Intune','Intune','Azure','Microsoft Purview',\n  'Purview','KQL','Logic Apps','SOAR','Tenable','CrowdStrike','Palo Alto','AWS Security','QRadar',\n  'SIEM','EDR','XDR','IAM','PAM','CSPM','Vulnerability Management'\n];\n\nfunction extractTechnologies(text) {\n  const t = text || '';\n  return TECH_KEYWORDS.filter(k => t.toLowerCase().includes(k.toLowerCase()));\n}\n\nfunction mapBySource(item) {\n  const src = item._source || 'Unknown';\n  const now = new Date().toISOString();\n\n  // Champs bruts possibles selon la source (RSS Job Bank / Jobillico, Greenhouse, Lever, Outlook email)\n  const title = item.title || item.subject || (item.text ? item.text.split('\\n')[0] : '') || '';\n  const url = item.link || item.absolute_url || item.hostedUrl || item.url || '';\n  const description = cleanText(item.contentSnippet || item.content || item.description || item.body || item.bodyPreview || '');\n  const company = item.company || (item.categories && item.categories.department) || 'Unknown';\n  const location = (item.location && item.location.name) || (item.categories && item.categories.location) || item.locationstring || '';\n  const datePosted = item.pubDate || item.updated_at || item.createdAt || item.dateReceived || now;\n\n  return {\n    job_id: `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,\n    source: src,\n    source_job_id: String(item.id || item.guid || item.leverId || url || Math.random()),\n    url: url,\n    company: company,\n    title: cleanText(title),\n    location: cleanText(location),\n    province: '',\n    country: '',\n    work_mode: guessWorkMode(description + ' ' + location),\n    employment_type: guessEmploymentType(description),\n    salary_min: null,\n    salary_max: null,\n    salary_currency: '',\n    description: description,\n    requirements: [],\n    technologies: extractTechnologies(description + ' ' + title),\n    certifications: [],\n    languages: [],\n    security_clearance: '',\n    date_posted: datePosted,\n    date_discovered: now,\n    application_url: url,\n    easy_apply: false\n  };\n}\n\nreturn $input.all().map(i => ({ json: mapBySource(i.json) }));"
+      },
+      "id": "normalize_jobs",
+      "name": "Normalize_To_Common_Schema",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [40, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_title_not_empty",
+              "leftValue": "={{ $json.title }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter_valid_jobs",
+      "name": "Filter_Valid_Jobs",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [280, 60]
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF03_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF03_DEDUPLICATION"
+        },
+        "options": {}
+      },
+      "id": "call_wf03_deduplication",
+      "name": "Call_WF03_Deduplication",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [520, 60]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Normalize_To_Common_Schema", "type": "main", "index": 0 }]]
+    },
+    "Normalize_To_Common_Schema": {
+      "main": [[{ "node": "Filter_Valid_Jobs", "type": "main", "index": 0 }]]
+    },
+    "Filter_Valid_Jobs": {
+      "main": [[{ "node": "Call_WF03_Deduplication", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

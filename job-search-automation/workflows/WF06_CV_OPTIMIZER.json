@@ -1,0 +1,288 @@
+{
+  "name": "WF06_CV_OPTIMIZER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF06_CV_OPTIMIZER\n\n**Objectif** : adapter le CV maître (FR/EN) à l'offre, viser `ATS_MATCH >= 80` (variable `ATS_MATCH_TARGET`), sans jamais inventer un fait. Boucle jusqu'à `CV_OPTIMIZER_MAX_ITERATIONS`. Contre-vérification ATS par OpenAI en fin de boucle.\n\nPrompt complet : `/prompts/03-cv-optimizer.md`. Schéma : `/schemas/cv_optimizer.schema.json`.\n\n⚠️ Adapter `Download_Master_CV` (référence de fichier OneDrive réelle) et l'opération exacte du node Extract From File selon votre version n8n.",
+        "height": 300,
+        "width": 460
+      },
+      "id": "sticky_wf06",
+      "name": "Objectif_WF06",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -260]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf06",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-280, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst text = ((j.title || '') + ' ' + (j.description || '')).toLowerCase();\nconst frenchMarkers = ['emploi','poste','expérience','compétences','responsabilités','québec','entreprise'];\nconst frenchScore = frenchMarkers.reduce((acc, m) => acc + (text.includes(m) ? 1 : 0), 0);\nconst cv_language = frenchScore >= 2 ? 'FR' : 'EN';\nreturn [{ json: { ...j, cv_language, cv_iterations: 0 } }];"
+      },
+      "id": "choose_cv_language",
+      "name": "Choose_CV_Language",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-40, 60]
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "download",
+        "file": {
+          "__rl": true,
+          "value": "={{ $json.cv_language === 'FR' ? $vars.CV_FR_MASTER_PATH : $vars.CV_EN_MASTER_PATH }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "download_master_cv",
+      "name": "Download_Master_CV",
+      "type": "n8n-nodes-base.microsoftOneDrive",
+      "typeVersion": 1,
+      "position": [200, 60],
+      "credentials": {
+        "microsoftOneDriveOAuth2Api": {
+          "id": "REPLACE_WITH_ONEDRIVE_CREDENTIAL",
+          "name": "Microsoft OneDrive OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "docx",
+        "destinationKey": "cv_text",
+        "options": {}
+      },
+      "id": "extract_cv_text",
+      "name": "Extract_CV_Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [440, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst iteration = j.cv_iterations || 0;\nconst previousFeedback = j.cv_optimization ? `\\n\\nItération précédente: optimized_ats_score=${j.cv_optimization.optimized_ats_score}, gaps_not_coverable=${JSON.stringify(j.cv_optimization.gaps_not_coverable || [])}. Améliore honnêtement la réorganisation/formulation SANS inventer de fait pour combler les gaps non couvrables.` : '';\n\nconst systemPrompt = `Tu es CV_OPTIMIZER. INTERDICTION ABSOLUE d'inventer compétence, certification, technologie, expérience, projet, entreprise, responsabilité, ou d'augmenter les années d'expérience, ou de changer un titre officiel de façon trompeuse. Tu peux réorganiser, réécrire le résumé professionnel, reformuler des tâches réelles, mettre en avant des projets réels, ajuster les mots-clés ATS pour des compétences réellement possédées, changer l'ordre des expériences. Calcule base_ats_score puis optimized_ats_score (0-100). Objectif optimized_ats_score >= ${$vars.ATS_MATCH_TARGET || 80}. Réponds UNIQUEMENT via l'outil return_cv_optimization.${previousFeedback}`;\n\nconst userMessage = JSON.stringify({\n  job_offer: { title: j.title, company: j.company, description: j.description, technologies: j.technologies },\n  master_cv_text: j.cv_text,\n  language: j.cv_language,\n  job_analysis: j.final_analysis || {},\n  company_research: j.company_research || {}\n});\n\nreturn [{ json: { ...j, cv_iterations: iteration, optimizer_system_prompt: systemPrompt, optimizer_user_message: userMessage } }];"
+      },
+      "id": "build_cv_optimizer_request",
+      "name": "Build_CV_Optimizer_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 60]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 4000, system: $json.optimizer_system_prompt, messages: [{ role: 'user', content: $json.optimizer_user_message }], tools: [{ name: 'return_cv_optimization', description: 'Retourne le CV optimisé de façon structurée', input_schema: { type: 'object', required: ['job_id','language_used','base_ats_score','optimized_ats_score','cv_sections','gaps_covered_honestly','gaps_not_coverable','changes_summary','model'], properties: { job_id: { type: 'string' }, language_used: { type: 'string' }, base_ats_score: { type: 'number' }, optimized_ats_score: { type: 'number' }, cv_sections: { type: 'object' }, gaps_covered_honestly: { type: 'array', items: { type: 'string' } }, gaps_not_coverable: { type: 'array', items: { type: 'string' } }, changes_summary: { type: 'string' }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_cv_optimization' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_cv_optimizer",
+      "name": "Call_Claude_CV_Optimizer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 60],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const optimization = toolUse ? toolUse.input : {};\n  const job = $('Build_CV_Optimizer_Request').first().json;\n  return { json: { ...job, cv_optimization: { ...optimization, model: body.model } } };\n});"
+      },
+      "id": "parse_cv_optimizer_response",
+      "name": "Parse_CV_Optimizer_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst iterations = (j.cv_iterations || 0) + 1;\nconst target = parseInt($vars.ATS_MATCH_TARGET || '80', 10);\nconst maxIterations = parseInt($vars.CV_OPTIMIZER_MAX_ITERATIONS || '3', 10);\nconst targetReached = (j.cv_optimization.optimized_ats_score || 0) >= target;\nconst shouldRetry = !targetReached && iterations < maxIterations;\nreturn [{ json: { ...j, cv_iterations: iterations, target_reached: targetReached, should_retry: shouldRetry } }];"
+      },
+      "id": "increment_iteration_and_decide",
+      "name": "Increment_Iteration_And_Decide",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 60]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_should_retry",
+              "leftValue": "={{ $json.should_retry }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_should_retry",
+      "name": "IF_Should_Retry",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1640, 60]
+    },
+    {
+      "parameters": {
+        "jsCode": "const j = $json;\nconst systemPrompt = `Tu es un REVIEWER OpenAI spécialisé ATS. Compare le CV optimisé fourni aux mots-clés de l'offre et donne ton propre score ATS 0-100 indépendant, ainsi que les mots-clés encore manquants. Réponds UNIQUEMENT en JSON: {\\\"ats_score\\\": number, \\\"missing_keywords\\\": string[], \\\"notes\\\": string}.`;\nconst userMessage = JSON.stringify({ job_description: j.description, cv_sections: j.cv_optimization.cv_sections });\nreturn [{ json: { ...j, ats_check_system_prompt: systemPrompt, ats_check_user_message: userMessage } }];"
+      },
+      "id": "build_openai_ats_check_request",
+      "name": "Build_OpenAI_ATS_Check_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1880, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.OPENAI_MODEL || 'gpt-4.1', response_format: { type: 'json_object' }, messages: [ { role: 'system', content: $json.ats_check_system_prompt }, { role: 'user', content: $json.ats_check_user_message } ] }) }}",
+        "options": {}
+      },
+      "id": "call_openai_ats_check",
+      "name": "Call_OpenAI_ATS_Check",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2120, 180],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const job = $('Build_OpenAI_ATS_Check_Request').first().json;\n  let atsCheck = {};\n  try { atsCheck = JSON.parse(body.choices[0].message.content); } catch (e) { atsCheck = { ats_score: job.cv_optimization.optimized_ats_score, missing_keywords: [], notes: 'Fallback: réponse OpenAI non parsable' }; }\n  return { json: { ...job, openai_ats_check: atsCheck } };\n});"
+      },
+      "id": "parse_openai_ats_check",
+      "name": "Parse_OpenAI_ATS_Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2360, 180]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agent_name": "CV_OPTIMIZER",
+            "model": "={{ $json.cv_optimization.model }}",
+            "job_id": "={{ $json.job_id }}",
+            "score": "={{ $json.cv_optimization.optimized_ats_score }}",
+            "decision": "={{ $json.target_reached ? 'ATS_TARGET_REACHED' : 'ATS_BEST_EFFORT' }}",
+            "reason": "={{ $json.cv_optimization.changes_summary }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log_agent_run_wf06",
+      "name": "Log_Agent_Run",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [2600, 60],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_WF07_WORKFLOW_ID",
+          "mode": "list",
+          "cachedResultName": "WF07_CV_GENERATOR"
+        },
+        "options": {}
+      },
+      "id": "call_wf07_cv_generator",
+      "name": "Call_WF07_CV_Generator",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [2840, 60]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Choose_CV_Language", "type": "main", "index": 0 }]]
+    },
+    "Choose_CV_Language": {
+      "main": [[{ "node": "Download_Master_CV", "type": "main", "index": 0 }]]
+    },
+    "Download_Master_CV": {
+      "main": [[{ "node": "Extract_CV_Text", "type": "main", "index": 0 }]]
+    },
+    "Extract_CV_Text": {
+      "main": [[{ "node": "Build_CV_Optimizer_Request", "type": "main", "index": 0 }]]
+    },
+    "Build_CV_Optimizer_Request": {
+      "main": [[{ "node": "Call_Claude_CV_Optimizer", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_CV_Optimizer": {
+      "main": [[{ "node": "Parse_CV_Optimizer_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_CV_Optimizer_Response": {
+      "main": [[{ "node": "Increment_Iteration_And_Decide", "type": "main", "index": 0 }]]
+    },
+    "Increment_Iteration_And_Decide": {
+      "main": [[{ "node": "IF_Should_Retry", "type": "main", "index": 0 }]]
+    },
+    "IF_Should_Retry": {
+      "main": [
+        [{ "node": "Build_CV_Optimizer_Request", "type": "main", "index": 0 }],
+        [{ "node": "Build_OpenAI_ATS_Check_Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build_OpenAI_ATS_Check_Request": {
+      "main": [[{ "node": "Call_OpenAI_ATS_Check", "type": "main", "index": 0 }]]
+    },
+    "Call_OpenAI_ATS_Check": {
+      "main": [[{ "node": "Parse_OpenAI_ATS_Check", "type": "main", "index": 0 }]]
+    },
+    "Parse_OpenAI_ATS_Check": {
+      "main": [[{ "node": "Log_Agent_Run", "type": "main", "index": 0 }]]
+    },
+    "Log_Agent_Run": {
+      "main": [[{ "node": "Call_WF07_CV_Generator", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

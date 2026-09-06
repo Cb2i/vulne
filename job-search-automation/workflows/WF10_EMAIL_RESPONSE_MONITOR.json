@@ -1,0 +1,273 @@
+{
+  "name": "WF10_EMAIL_RESPONSE_MONITOR",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF10_EMAIL_RESPONSE_MONITOR\n\n**Objectif** : lire les nouveaux courriels (fenêtre `EMAIL_MONITOR_LOOKBACK_MINUTES`), classifier avec Claude (fallback OpenAI si Claude échoue après 3 essais, §43), extraire entreprise/poste/action/deadline, mettre à jour `Applications` dans Airtable.\n\nPrompt complet : `/prompts/05-email-response-monitor.md`. Schéma : `/schemas/email_response_monitor.schema.json`.\n\nDéclenchement recommandé : toutes les 30-60 minutes, indépendant du cycle WF01 (00:00/08:00/16:00).",
+        "height": 280,
+        "width": 460
+      },
+      "id": "sticky_wf10",
+      "name": "Objectif_WF10",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-280, -240]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "*/30 * * * *" }] }
+      },
+      "id": "schedule_trigger_email_monitor",
+      "name": "Schedule_Trigger_Every_30min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-280, 40]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "filter": "={{ 'receivedDateTime ge ' + new Date(Date.now() - (parseInt($vars.EMAIL_MONITOR_LOOKBACK_MINUTES || '90', 10) * 60000)).toISOString() }}"
+        }
+      },
+      "id": "get_recent_emails",
+      "name": "Get_Recent_Emails",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [-40, 40],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_WITH_OUTLOOK_CREDENTIAL",
+          "name": "Microsoft Outlook OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "returnAll": true,
+        "options": {}
+      },
+      "id": "get_known_applications",
+      "name": "Get_Known_Applications",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [-40, 220],
+      "executeOnce": true,
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const email = $json;\nconst knownApps = $('Get_Known_Applications').all().map(i => ({ application_id: i.json.id, company: i.json.fields?.company, title: i.json.fields?.title, application_date: i.json.fields?.application_date }));\n\nconst systemPrompt = `Tu es EMAIL_RESPONSE_MONITOR. Classifie EXACTEMENT en une catégorie: APPLICATION_CONFIRMATION, RECRUITER_MESSAGE, INTERVIEW_REQUEST, TECHNICAL_TEST, REJECTION, JOB_OFFER, REQUEST_FOR_INFORMATION, UNKNOWN. Extrais company, job_title, recruiter_name, action_required, deadline, proposed_date. Fais correspondre à known_applications SEULEMENT si raisonnablement certain (sinon matched_application_id=null). Ne rédige jamais de réponse au recruteur. Réponds UNIQUEMENT via l'outil return_email_classification.`;\nconst userMessage = JSON.stringify({\n  email_subject: email.subject,\n  email_body: (email.bodyPreview || (email.body && email.body.content) || '').toString().slice(0, 6000),\n  email_from: (email.from && email.from.emailAddress && email.from.emailAddress.address) || '',\n  email_date: email.receivedDateTime,\n  known_applications: knownApps\n});\n\nreturn [{ json: { ...email, em_system_prompt: systemPrompt, em_user_message: userMessage } }];"
+      },
+      "id": "build_email_monitor_request",
+      "name": "Build_Email_Monitor_Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, 40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "anthropic-version", "value": "2023-06-01" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.CLAUDE_MODEL || 'claude-sonnet-5', max_tokens: 1200, system: $json.em_system_prompt, messages: [{ role: 'user', content: $json.em_user_message }], tools: [{ name: 'return_email_classification', description: 'Retourne la classification structurée du courriel', input_schema: { type: 'object', required: ['classification','confidence','extracted','matched_application_id','suggested_application_status','model'], properties: { classification: { type: 'string' }, confidence: { type: 'string' }, extracted: { type: 'object' }, matched_application_id: { type: ['string','null'] }, suggested_application_status: { type: ['string','null'] }, model: { type: 'string' } } } }], tool_choice: { type: 'tool', name: 'return_email_classification' } }) }}",
+        "options": {}
+      },
+      "id": "call_claude_email_monitor",
+      "name": "Call_Claude_Email_Monitor",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 40],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_WITH_ANTHROPIC_CREDENTIAL",
+          "name": "Anthropic account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const toolUse = (body.content || []).find(c => c.type === 'tool_use');\n  const classification = toolUse ? toolUse.input : {};\n  const email = $('Build_Email_Monitor_Request').first().json;\n  return { json: { ...email, email_classification: { ...classification, model: body.model } } };\n});"
+      },
+      "id": "parse_claude_email_response",
+      "name": "Parse_Claude_Email_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, -80]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $vars.OPENAI_MODEL || 'gpt-4.1', response_format: { type: 'json_object' }, messages: [ { role: 'system', content: $('Build_Email_Monitor_Request').first().json.em_system_prompt + ' Réponds en JSON brut (pas d\\'outil).' }, { role: 'user', content: $('Build_Email_Monitor_Request').first().json.em_user_message } ] }) }}",
+        "options": {}
+      },
+      "id": "call_openai_fallback",
+      "name": "Call_OpenAI_Fallback",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "REPLACE_WITH_OPENAI_CREDENTIAL",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => {\n  const body = item.json;\n  const email = $('Build_Email_Monitor_Request').first().json;\n  let classification = {};\n  try { classification = JSON.parse(body.choices[0].message.content); } catch (e) { classification = { classification: 'UNKNOWN', confidence: 'UNKNOWN', extracted: {}, matched_application_id: null, suggested_application_status: null }; }\n  return { json: { ...email, email_classification: { ...classification, model: 'openai-fallback' } } };\n});"
+      },
+      "id": "parse_openai_fallback_response",
+      "name": "Parse_OpenAI_Fallback_Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [920, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_matched_app",
+              "leftValue": "={{ $json.email_classification.matched_application_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_matched_application",
+      "name": "IF_Matched_Application",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1160, 40]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["id"],
+          "value": {
+            "id": "={{ $json.email_classification.matched_application_id }}",
+            "status": "={{ $json.email_classification.suggested_application_status || 'REQUIRES_MANUAL_REVIEW' }}",
+            "response_type": "={{ $json.email_classification.classification }}",
+            "interview_date": "={{ $json.email_classification.extracted.proposed_date || '' }}",
+            "notes": "={{ ($json.email_classification.extracted.action_required || '') + (($json.email_classification.extracted.deadline) ? (' | Échéance: ' + $json.email_classification.extracted.deadline) : '') }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "update_application_status",
+      "name": "Update_Application_Status",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1400, -80],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "AgentRuns", "mode": "list", "cachedResultName": "AgentRuns" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "agent_name": "EMAIL_RESPONSE_MONITOR",
+            "model": "={{ $json.email_classification.model }}",
+            "decision": "={{ $json.email_classification.classification }}",
+            "reason": "={{ 'Courriel non associé à une candidature connue (sujet: ' + $json.subject + ')' }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "log_unmatched_email",
+      "name": "Log_Unmatched_Email",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1400, 200],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule_Trigger_Every_30min": {
+      "main": [
+        [
+          { "node": "Get_Recent_Emails", "type": "main", "index": 0 },
+          { "node": "Get_Known_Applications", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Get_Recent_Emails": {
+      "main": [[{ "node": "Build_Email_Monitor_Request", "type": "main", "index": 0 }]]
+    },
+    "Build_Email_Monitor_Request": {
+      "main": [[{ "node": "Call_Claude_Email_Monitor", "type": "main", "index": 0 }]]
+    },
+    "Call_Claude_Email_Monitor": {
+      "main": [
+        [{ "node": "Parse_Claude_Email_Response", "type": "main", "index": 0 }],
+        [{ "node": "Call_OpenAI_Fallback", "type": "main", "index": 0 }]
+      ]
+    },
+    "Call_OpenAI_Fallback": {
+      "main": [[{ "node": "Parse_OpenAI_Fallback_Response", "type": "main", "index": 0 }]]
+    },
+    "Parse_Claude_Email_Response": {
+      "main": [[{ "node": "IF_Matched_Application", "type": "main", "index": 0 }]]
+    },
+    "Parse_OpenAI_Fallback_Response": {
+      "main": [[{ "node": "IF_Matched_Application", "type": "main", "index": 0 }]]
+    },
+    "IF_Matched_Application": {
+      "main": [
+        [{ "node": "Update_Application_Status", "type": "main", "index": 0 }],
+        [{ "node": "Log_Unmatched_Email", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

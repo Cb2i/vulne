@@ -1,0 +1,171 @@
+{
+  "name": "WF09_APPLICATION_TRACKER",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF09_APPLICATION_TRACKER\n\n**Objectif** : enregistrer/mettre à jour la candidature dans Airtable `Applications`, synchroniser Excel `Job_Search_Dashboard.xlsx`, et envoyer une notification immédiate si `overall_score >= HIGH_ALERT_SCORE_THRESHOLD` (défaut 90, §38).",
+        "height": 220,
+        "width": 420
+      },
+      "id": "sticky_wf09",
+      "name": "Objectif_WF09",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-260, -200]
+    },
+    {
+      "parameters": {},
+      "id": "execute_wf_trigger_wf09",
+      "name": "When_Called_By_Another_Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-260, 40]
+    },
+    {
+      "parameters": {
+        "operation": "upsert",
+        "base": { "__rl": true, "value": "={{ $vars.AIRTABLE_BASE_ID }}", "mode": "id" },
+        "table": { "__rl": true, "value": "Applications", "mode": "list", "cachedResultName": "Applications" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": ["job_id"],
+          "value": {
+            "application_id": "={{ $json.job_id + '-app' }}",
+            "job_id": "={{ $json.job_id }}",
+            "company": "={{ $json.company }}",
+            "title": "={{ $json.title }}",
+            "application_date": "={{ $now.toISO() }}",
+            "cv_version": "={{ $json.cv_file_name }}",
+            "cover_letter": "={{ $json.cl_onedrive_path || '' }}",
+            "overall_score": "={{ $json.final_analysis.overall_score }}",
+            "ats_score": "={{ $json.cv_optimization.optimized_ats_score }}",
+            "application_method": "={{ $json.application_method }}",
+            "status": "={{ $json.application_status }}",
+            "blocking_reason": "={{ $json.blocking_reason || '' }}",
+            "response_type": "none"
+          }
+        },
+        "options": {}
+      },
+      "id": "upsert_application_record",
+      "name": "Upsert_Application_Record",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [0, 40],
+      "credentials": {
+        "airtableTokenApi": {
+          "id": "REPLACE_WITH_AIRTABLE_CREDENTIAL",
+          "name": "Airtable Job Search PAT"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "workbook": {
+          "__rl": true,
+          "value": "={{ $vars.ONEDRIVE_ROOT_FOLDER + '/Reports/Job_Search_Dashboard.xlsx' }}",
+          "mode": "id"
+        },
+        "worksheet": { "__rl": true, "value": "Applications", "mode": "name" },
+        "dataMode": "defineBelow",
+        "fieldsUi": {
+          "values": [
+            { "column": "application_id", "value": "={{ $('When_Called_By_Another_Workflow').first().json.job_id + '-app' }}" },
+            { "column": "company", "value": "={{ $json.company }}" },
+            { "column": "title", "value": "={{ $json.title }}" },
+            { "column": "overall_score", "value": "={{ $json.final_analysis.overall_score }}" },
+            { "column": "ats_score", "value": "={{ $json.cv_optimization.optimized_ats_score }}" },
+            { "column": "status", "value": "={{ $json.application_status }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "sync_excel_applications",
+      "name": "Sync_Excel_Applications",
+      "type": "n8n-nodes-base.microsoftExcel",
+      "typeVersion": 2.1,
+      "position": [240, 40],
+      "credentials": {
+        "microsoftExcelOAuth2Api": {
+          "id": "REPLACE_WITH_EXCEL_CREDENTIAL",
+          "name": "Microsoft Excel 365 OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "cond_score_ge_90",
+              "leftValue": "={{ $json.final_analysis.overall_score }}",
+              "rightValue": "={{ parseInt($vars.HIGH_ALERT_SCORE_THRESHOLD || '90', 10) }}",
+              "operator": { "type": "number", "operation": "gte" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if_score_gte_90",
+      "name": "IF_Score_GTE_90",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [480, 40]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "subject": "={{ '🔥 Offre cybersécurité à très forte correspondance - ' + $json.company + ' - ' + $json.title }}",
+        "bodyContent": "={{ '<h2>' + $json.title + ' — ' + $json.company + '</h2>' + '<p><b>Score global:</b> ' + $json.final_analysis.overall_score + '/100</p>' + '<p><b>Score ATS:</b> ' + $json.cv_optimization.optimized_ats_score + '/100</p>' + '<p><b>Localisation:</b> ' + $json.location + ' (' + $json.work_mode + ')</p>' + '<p><b>Salaire:</b> ' + ($json.salary_min || 'N/D') + ' - ' + ($json.salary_max || 'N/D') + ' ' + ($json.salary_currency || '') + '</p>' + '<p><b>Technologies:</b> ' + (($json.technologies || []).join(', ')) + '</p>' + '<p><b>Chance d\\'entretien:</b> ' + $json.final_analysis.interview_probability.label + '</p>' + '<p><b>Statut de candidature:</b> ' + $json.application_status + '</p>' + '<p><a href=\"' + $json.url + '\">Voir l\\'offre</a></p>' }}",
+        "bodyContentType": "html",
+        "toRecipients": "={{ $vars.NOTIFICATION_RECIPIENT }}",
+        "options": {}
+      },
+      "id": "send_priority_notification_email",
+      "name": "Send_Priority_Notification_Email",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [720, -80],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "REPLACE_WITH_OUTLOOK_CREDENTIAL",
+          "name": "Microsoft Outlook OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "no_priority_notification",
+      "name": "No_Priority_Notification",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [720, 160]
+    }
+  ],
+  "connections": {
+    "When_Called_By_Another_Workflow": {
+      "main": [[{ "node": "Upsert_Application_Record", "type": "main", "index": 0 }]]
+    },
+    "Upsert_Application_Record": {
+      "main": [[{ "node": "Sync_Excel_Applications", "type": "main", "index": 0 }]]
+    },
+    "Sync_Excel_Applications": {
+      "main": [[{ "node": "IF_Score_GTE_90", "type": "main", "index": 0 }]]
+    },
+    "IF_Score_GTE_90": {
+      "main": [
+        [{ "node": "Send_Priority_Notification_Email", "type": "main", "index": 0 }],
+        [{ "node": "No_Priority_Notification", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "REPLACE_WITH_WF12_WORKFLOW_ID"
+  }
+}

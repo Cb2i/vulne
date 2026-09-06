@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CompanyResearcherOutput",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["job_id", "company_name", "fields", "model"],
+  "properties": {
+    "job_id": { "type": "string" },
+    "company_name": { "type": "string" },
+    "fields": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "industry",
+        "size_estimate",
+        "technologies_mentioned",
+        "cybersecurity_posture",
+        "cloud_environment",
+        "microsoft_presence",
+        "recent_projects",
+        "culture_notes"
+      ],
+      "properties": {
+        "industry": { "$ref": "#/definitions/confidentField" },
+        "size_estimate": { "$ref": "#/definitions/confidentField" },
+        "technologies_mentioned": { "$ref": "#/definitions/confidentField" },
+        "cybersecurity_posture": { "$ref": "#/definitions/confidentField" },
+        "cloud_environment": { "$ref": "#/definitions/confidentField" },
+        "microsoft_presence": { "$ref": "#/definitions/confidentField" },
+        "recent_projects": { "$ref": "#/definitions/confidentField" },
+        "culture_notes": { "$ref": "#/definitions/confidentField" }
+      }
+    },
+    "model": { "type": "string" }
+  },
+  "definitions": {
+    "confidentField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "confidence"],
+      "properties": {
+        "value": { "type": ["string", "null"] },
+        "confidence": { "type": "string", "enum": ["SUPPORTED", "INFERRED", "UNKNOWN"] }
+      }
+    }
+  }
+}

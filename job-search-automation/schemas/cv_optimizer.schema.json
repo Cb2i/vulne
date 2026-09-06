@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CvOptimizerOutput",
+  "version": "1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "job_id",
+    "language_used",
+    "base_ats_score",
+    "optimized_ats_score",
+    "iterations",
+    "cv_sections",
+    "gaps_covered_honestly",
+    "gaps_not_coverable",
+    "changes_summary",
+    "model"
+  ],
+  "properties": {
+    "job_id": { "type": "string" },
+    "language_used": { "type": "string", "enum": ["FR", "EN"] },
+    "base_ats_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "optimized_ats_score": { "type": "number", "minimum": 0, "maximum": 100 },
+    "iterations": { "type": "integer", "minimum": 1 },
+    "cv_sections": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["professional_summary", "skills", "experience", "certifications", "education"],
+      "properties": {
+        "professional_summary": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "experience": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["company", "title", "period", "bullets"],
+            "properties": {
+              "company": { "type": "string" },
+              "title": { "type": "string" },
+              "period": { "type": "string" },
+              "bullets": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "certifications": { "type": "array", "items": { "type": "string" } },
+        "education": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "gaps_covered_honestly": { "type": "array", "items": { "type": "string" } },
+    "gaps_not_coverable": { "type": "array", "items": { "type": "string" } },
+    "changes_summary": { "type": "string" },
+    "model": { "type": "string" }
+  }
+}
