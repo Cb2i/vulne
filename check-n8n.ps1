@@ -34,7 +34,7 @@ function Test-Item {
 Write-Host "`n=== Verification de l'environnement n8n ===`n" -ForegroundColor Cyan
 
 # 1. Docker CLI installe
-Test-Item "Docker CLI installe" {
+$null = Test-Item "Docker CLI installe" {
     $null = Get-Command docker -ErrorAction Stop
     $true
 }
@@ -46,7 +46,7 @@ $dockerRunning = Test-Item "Docker Desktop demarre (daemon accessible)" {
 }
 
 # 3. Plugin Docker Compose disponible
-Test-Item "Plugin Docker Compose disponible" {
+$null = Test-Item "Plugin Docker Compose disponible" {
     docker compose version *> $null
     $LASTEXITCODE -eq 0
 }
@@ -59,7 +59,7 @@ $composeExists = Test-Item "docker-compose.yml present dans le dossier courant" 
 
 # 5. Fichier compose syntaxiquement valide (seulement si docker tourne + fichier present)
 if ($dockerRunning -and $composeExists) {
-    Test-Item "docker-compose.yml valide (docker compose config)" {
+    $null = Test-Item "docker-compose.yml valide (docker compose config)" {
         docker compose config *> $null
         $LASTEXITCODE -eq 0
     }
@@ -74,7 +74,7 @@ if (-not $envExists) {
 }
 
 # 7. Port 5678 libre
-Test-Item "Port 5678 libre" {
+$null = Test-Item "Port 5678 libre" {
     $conn = Get-NetTCPConnection -LocalPort 5678 -ErrorAction SilentlyContinue
     -not $conn
 }
